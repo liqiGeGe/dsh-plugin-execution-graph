@@ -4,6 +4,12 @@
 
 一个 DeepSeek Harness（DSH）客户端插件，为会话视图新增一个**「执行图」**标签页。它把一个会话轮次的活动重建为 [React Flow](https://reactflow.dev) 画布上的纵向时间轴：该轮次的 `request-header`、`assistant-message`、`tool-call` 与 `tool-result` 节点被排入自上而下堆叠的时间步，并以带箭头的边从上一步指向下一步。`turn-group` 容器节点不再绘制——每次只展示一个轮次（默认当前会话的最后一轮），容器方框已属冗余。工具调用不会按名称合并——每次调用及其结果都是独立节点，通过 `resolves` 边配对；助手消息中的工具调用块通过 `triggers` 边连接到对应的 `tool-call` 节点；同一分组内的节点按事件发生顺序通过 `sequence` 边相连。由同一条助手消息触发的并行工具调用共享一个时间步并在水平方向铺开；单列最多十个时间步，超出后换到右侧下一列，并且当某列最后一行有多个并行节点汇入下一列时，它们的连线会先经过一个汇聚圆点再折入下一列。正在运行的工具调用（存在于共享 Session 窗口的运行中调用 id 集合、尚无已完结结果）会渲染为独立的虚线脉动边框，而不会虚构一个结果。`tool-call` 卡片把 `工具` 类型标签与工具名放在同一行，参数缩略预览放在第二行。选中节点会在右侧填充一个常驻详情侧栏——可拖拽调整宽度（320–600px，可折叠）——工具调用显示 `Payload` JSON 树，shell 命令显示按行拆分的命令块。画布上方的轮次选择框列出每个轮次并默认最后一轮；切换轮次会把画布以 scale 1 重新居中。画布左下角的下载按钮可将整张执行图导出为 PNG。该包不提供 service，也不声明 Context 合并；它会注册 target 专属 Conversation Event Definition、Graph 视图快照构建器，以及会话 `'conversation.view'` slot 环中的一个视图标签页。
 
+## Plugin results
+
+![graph-detail](./resource/image/graph-detail.png)
+![graph-detail-more](./resource/image/graph-detail-more.png)
+![graph-change-turn](./resource/image/graph-change-turn.png)
+
 ## 插件声明与生命周期
 
 这是一个纯消费型 Cordis 插件，包含两个入口面：
