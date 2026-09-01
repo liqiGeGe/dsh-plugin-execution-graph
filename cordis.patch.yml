@@ -1,0 +1,17 @@
+# Bundle patch for dsh-plugin-execution-graph.
+#
+# Applied when a profile lists this bundle (see dsh.bundle.patch in package.json).
+# It appends one client-plugin row to the boot roster: the host scans the
+# package's `dsh.client` manifest and loads the browser plugin, which registers
+# the "Execution graph" tab into the conversation view's `'conversation.view'`
+# slot ring. The row references the package by name so Node resolution finds the
+# installed code.
+#
+# This plugin is a pure consumer: it declares no service and no Context merge.
+# It injects the locale, conversation-events, conversation-views, and slots
+# services (already provided by @deepseek-ai/dsh-base and the web surface), so
+# no extra rows are required. Unloading the plugin reverts every side effect it
+# registers (the view tab, the locale dictionary, and the React Flow stylesheet).
+- insert:
+    - id: execution-graph
+      name: dsh-plugin-execution-graph
