@@ -1,6 +1,6 @@
 /** Graph view: renders one session turn's activity as a React Flow timeline. */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import { IconChevronDownOutline14, IconCloseOutline16, IconDownloadOutline16, JsonTree, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -8,12 +8,13 @@ import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/clie
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GraphCardNode } from './graph-contract.ts'
 import { filterSnapshotByTurn, listTurnPreviews } from './graph-contract.ts'
+import { assistantFoldMembers, foldCapsuleView } from './graph-fold.ts'
 import { layoutGraphSnapshot } from './graph-layout.ts'
 import type { PositionedGraphEdge } from './graph-layout.ts'
 import { downloadGraphPng } from './graph-export.ts'
 import { EMPTY_GRAPH_SNAPSHOT } from './graph-snapshot-builder.ts'
-import { formatDurationMs, formatNodeTime, GRAPH_JUNCTION_TYPE, GRAPH_NODE_TYPE, graphNodeTypes } from './graph-nodes.tsx'
-import type { GraphNodeData, GraphTranslate } from './graph-nodes.tsx'
+import { formatDurationMs, formatNodeTime, GRAPH_FOLD_TYPE, GRAPH_JUNCTION_TYPE, GRAPH_NODE_TYPE, graphNodeTypes } from './graph-nodes.tsx'
+import type { GraphFoldCapsuleData, GraphFoldState, GraphNodeData, GraphTranslate } from './graph-nodes.tsx'
 import { extractCommand, parseToolArgs, splitCommandLines } from './tool-args.ts'
 import { NS } from './locales.ts'
 import { useResizableWidth } from './use-resizable-width.ts'
@@ -21,6 +22,12 @@ import css from './GraphView.module.css'
 
 /** Pixel diameter of a merge-junction dot (matches the `.junction` CSS box). */
 const JUNCTION_SIZE = 14
+
+/** Fold-capsule pill dimensions (matches the `.foldCapsule` CSS box). */
+const FOLD_CAPSULE_WIDTH = 160
+const FOLD_CAPSULE_HEIGHT = 30
+/** Vertical gap between a collapsed assistant card and its fold capsule. */
+const FOLD_CAPSULE_GAP = 10
 
 /** Download file name for a turn's exported PNG. */
 function exportFileName(turn: number): string {
@@ -185,7 +192,7 @@ function TurnSelect({
  *
  * @param props - The reset trigger key and the content's extent (`width`/`height`).
  */
-function ViewportController({ resetKey, width, height }: { resetKey: number; width: number; height: number }) {
+function ViewportController({ resetKey, width, height }: { resetKey: string | number; width: number; height: number }) {
   const flow = useReactFlow()
   useEffect(() => {
     // Center the content's midpoint in the viewport at scale 1 (no fit-zoom).
@@ -209,29 +216,73 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
   const sidebar = useResizableWidth()
   // `null` means "auto-follow the last turn"; a number means the user picked a turn explicitly.
   const [pickedTurn, setPickedTurn] = useState<number | null>(null)
+  // Element ids of assistant-message nodes whose follower tool segments are hidden.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const lastTurn = useMemo(
     () => snapshot.nodes.reduce((max, node) => Math.max(max, node.turn), 0),
     [snapshot],
   )
   const selectedTurn = pickedTurn ?? lastTurn
   const filtered = useMemo(() => filterSnapshotByTurn(snapshot, selectedTurn), [snapshot, selectedTurn])
+  // The layout is always computed from the FULL turn snapshot. Folding is an
+  // in-place view transform (hide follower nodes + insert a capsule), so column
+  // assignment, node coordinates, and the viewport all stay stable across
+  // fold/expand toggles.
   const layout = useMemo(() => layoutGraphSnapshot(filtered), [filtered])
+  const foldMembers = useMemo(() => assistantFoldMembers(filtered), [filtered])
+  const foldableAssistantIds = useMemo(
+    () => new Set(
+      [...foldMembers.entries()].filter(([, members]) => members.length > 0).map(([id]) => id),
+    ),
+    [foldMembers],
+  )
+  const effectiveCollapsed = useMemo(
+    () => new Set([...collapsed].filter(id => foldableAssistantIds.has(id))),
+    [collapsed, foldableAssistantIds],
+  )
+  const foldView = useMemo(
+    () => foldCapsuleView(filtered, effectiveCollapsed),
+    [filtered, effectiveCollapsed],
+  )
+
+  const toggleFold = useCallback((assistantId: string): void => {
+    setCollapsed(current => {
+      const next = new Set(current)
+      if (next.has(assistantId)) next.delete(assistantId)
+      else next.add(assistantId)
+      return next
+    })
+  }, [])
 
   const flowNodes = useMemo<Node[]>(
     () => [
-      ...layout.nodes.map((positioned): Node<GraphNodeData> => ({
-        id: positioned.id,
-        type: GRAPH_NODE_TYPE,
-        position: { x: positioned.x, y: positioned.y },
-        width: positioned.width,
-        height: positioned.height,
-        selectable: true,
-        data: {
-          node: positioned.node,
-          running: positioned.node.kind === 'tool-call' && filtered.runningCallIds.has(positioned.node.callId),
-          t,
-        },
-      })),
+      ...layout.nodes
+        .filter(positioned => !foldView.hiddenIds.has(positioned.id))
+        .map((positioned): Node<GraphNodeData> => {
+          const isAssistant = positioned.node.kind === 'assistant-message'
+          const fold: GraphFoldState | undefined = isAssistant
+            ? {
+              collapsible: foldableAssistantIds.has(positioned.id),
+              collapsed: effectiveCollapsed.has(positioned.id),
+              count: foldMembers.get(positioned.id)?.length ?? 0,
+              onToggle: () => { toggleFold(positioned.id) },
+            }
+            : undefined
+          return {
+            id: positioned.id,
+            type: GRAPH_NODE_TYPE,
+            position: { x: positioned.x, y: positioned.y },
+            width: positioned.width,
+            height: positioned.height,
+            selectable: true,
+            data: {
+              node: positioned.node,
+              running: positioned.node.kind === 'tool-call' && filtered.runningCallIds.has(positioned.node.callId),
+              t,
+              ...(fold === undefined ? {} : { fold }),
+            },
+          }
+        }),
       ...layout.junctions.map((junction): Node => ({
         id: junction.id,
         type: GRAPH_JUNCTION_TYPE,
@@ -243,23 +294,72 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
         draggable: false,
         data: {},
       })),
+      ...foldView.capsules.map((capsule): Node<GraphFoldCapsuleData> => {
+        // Position the capsule directly below the collapsed assistant card,
+        // centered on the assistant's column so the fold stays in place.
+        const host = layout.nodes.find(entry => entry.id === capsule.assistantId)
+        const x = host === undefined ? 0 : host.x + (host.width - FOLD_CAPSULE_WIDTH) / 2
+        const y = host === undefined ? 0 : host.y + host.height + FOLD_CAPSULE_GAP
+        return {
+          id: capsule.id,
+          type: GRAPH_FOLD_TYPE,
+          position: { x, y },
+          width: FOLD_CAPSULE_WIDTH,
+          height: FOLD_CAPSULE_HEIGHT,
+          selectable: false,
+          draggable: false,
+          data: {
+            count: capsule.count,
+            t,
+            assistantId: capsule.assistantId,
+            onExpand: () => { toggleFold(capsule.assistantId) },
+          },
+        }
+      }),
     ],
-    [layout, filtered, t],
+    [layout, filtered, t, foldableAssistantIds, effectiveCollapsed, foldMembers, foldView],
   )
   const flowEdges = useMemo<Edge[]>(
-    () => layout.edges.map((positioned): Edge => {
-      const stroke = edgeStroke(positioned.edge)
-      const toJunction = positioned.target.startsWith('junction:')
-      return {
-        id: `${positioned.edge.kind}:${positioned.source}->${positioned.target}`,
-        source: positioned.source,
-        target: positioned.target,
-        style: { stroke, strokeWidth: 1.5 },
-        ...(positioned.orthogonal === true ? { type: 'step', pathOptions: { borderRadius: 0 } } : {}),
-        ...(toJunction ? {} : { markerEnd: { type: MarkerType.ArrowClosed, color: stroke } }),
+    () => {
+      const edges: Edge[] = layout.edges
+        // Drop any edge whose endpoint is hidden inside a folded segment.
+        .filter(positioned =>
+          !foldView.hiddenIds.has(positioned.source) && !foldView.hiddenIds.has(positioned.target))
+        .map((positioned): Edge => {
+          const stroke = edgeStroke(positioned.edge)
+          const toJunction = positioned.target.startsWith('junction:')
+          return {
+            id: `${positioned.edge.kind}:${positioned.source}->${positioned.target}`,
+            source: positioned.source,
+            target: positioned.target,
+            style: { stroke, strokeWidth: 1.5 },
+            ...(positioned.orthogonal === true ? { type: 'step', pathOptions: { borderRadius: 0 } } : {}),
+            ...(toJunction ? {} : { markerEnd: { type: MarkerType.ArrowClosed, color: stroke } }),
+          }
+        })
+      // Bridge each collapsed segment: assistant → capsule → next assistant.
+      for (const capsule of foldView.capsules) {
+        const stroke = 'var(--dsw-alias-border-l2)'
+        edges.push({
+          id: `folded:${capsule.assistantId}->${capsule.id}`,
+          source: capsule.assistantId,
+          target: capsule.id,
+          style: { stroke, strokeWidth: 1.5, strokeDasharray: '5 4' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+        })
+        if (capsule.nextAssistantId !== undefined) {
+          edges.push({
+            id: `folded:${capsule.id}->${capsule.nextAssistantId}`,
+            source: capsule.id,
+            target: capsule.nextAssistantId,
+            style: { stroke, strokeWidth: 1.5, strokeDasharray: '5 4' },
+            markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+          })
+        }
       }
-    }),
-    [layout],
+      return edges
+    },
+    [layout, foldView],
   )
 
   const selected = useMemo(

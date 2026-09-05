@@ -3,6 +3,7 @@
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { IconChevronDownOutline14, IconChevronUpOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GraphCardNode } from './graph-contract.ts'
 import { truncatePreview } from './graph-contract.ts'
 import type { NS } from './locales.ts'
@@ -11,12 +12,27 @@ import css from './GraphView.module.css'
 /** Translate bound to this plugin's `graph` namespace. */
 export type GraphTranslate = PropsLocale<typeof NS>['t']
 
+/**
+ * Folding affordance carried on an assistant-message card: whether its follower
+ * segment (tool calls/results up to the next assistant message) can be hidden,
+ * whether it currently is, how many follower nodes would hide, and the toggle
+ * handler. Absent for every other node kind.
+ */
+export interface GraphFoldState {
+  readonly collapsible: boolean
+  readonly collapsed: boolean
+  readonly count: number
+  readonly onToggle: () => void
+}
+
 /** Payload React Flow carries on every graph node, consumed by {@link GraphNodeCard}. */
 export interface GraphNodeData {
   readonly node: GraphCardNode
   /** True for a `tool-call` whose result has not settled yet (dashed, pulsing border). */
   readonly running: boolean
   readonly t: GraphTranslate
+  /** Present on assistant-message cards; folding the follower tool segment. */
+  readonly fold?: GraphFoldState
   [key: string]: unknown
 }
 
@@ -45,7 +61,7 @@ function cardClassName(node: GraphCardNode, running: boolean): string {
   }
 }
 
-function CardBody({ node, t }: { node: GraphCardNode; t: GraphTranslate }) {
+function CardBody({ node, t, fold }: { node: GraphCardNode; t: GraphTranslate; fold?: GraphFoldState }) {
   switch (node.kind) {
     case 'user-message':
       return (
@@ -72,8 +88,24 @@ function CardBody({ node, t }: { node: GraphCardNode; t: GraphTranslate }) {
           <span className={css.nodeHeadRow}>
             <span className={css.nodeTitle}>{t('node.assistantMessage')}</span>
             <span className={css.nodeTime}>{formatNodeTime(node.time)}</span>
+            {fold?.collapsible === true && (
+              <button
+                type="button"
+                className={css.nodeFold}
+                aria-label={t(fold.collapsed ? 'fold.expand' : 'fold.collapse')}
+                title={t(fold.collapsed ? 'fold.expand' : 'fold.collapse')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  fold.onToggle()
+                }}
+              >
+                {fold.collapsed ? <IconChevronDownOutline14 /> : <IconChevronUpOutline14 />}
+              </button>
+            )}
           </span>
-          {node.textPreview !== '' && <span className={css.nodeSubtitle}>{node.textPreview}</span>}
+          {fold?.collapsed === true
+            ? <span className={css.nodeSubtitle}>{t('fold.collapsedCount', { count: fold.count })}</span>
+            : node.textPreview !== '' && <span className={css.nodeSubtitle}>{node.textPreview}</span>}
         </>
       )
     case 'tool-call':
@@ -114,11 +146,11 @@ function CardBody({ node, t }: { node: GraphCardNode; t: GraphTranslate }) {
  * @param props - React Flow node props whose `data` is a {@link GraphNodeData}.
  */
 export function GraphNodeCard({ data }: NodeProps) {
-  const { node, running, t } = data as GraphNodeData
+  const { node, running, t, fold } = data as GraphNodeData
   return (
     <div className={cardClassName(node, running)}>
       <Handle type="target" position={Position.Top} className={css.handle} isConnectable={false} />
-      <CardBody node={node} t={t} />
+      <CardBody node={node} t={t} {...(fold === undefined ? {} : { fold })} />
       <Handle type="source" position={Position.Bottom} className={css.handle} isConnectable={false} />
     </div>
   )
@@ -138,10 +170,55 @@ export function GraphJunctionNode() {
   )
 }
 
-/** React Flow node-type registry: the shared card plus the merge-junction dot. */
+/** Payload for a fold capsule that replaces a collapsed assistant segment. */
+export interface GraphFoldCapsuleData {
+  /** Number of follower nodes hidden inside the segment. */
+  readonly count: number
+  /** Translate bound to this plugin's `graph` namespace. */
+  readonly t: GraphTranslate
+  /** Element id of the collapsed assistant-message node (its expand target). */
+  readonly assistantId: string
+  /** Expand the collapsed segment. */
+  readonly onExpand: () => void
+  [key: string]: unknown
+}
+
+/**
+ * A fold capsule: a wide pill that stands in for a collapsed assistant segment
+ * (the tool calls/results between one assistant message and the next). Rendered
+ * at the segment's vertical extent so the surrounding cards stay in place;
+ * clicking it expands the segment. Carries a top target Handle and a bottom
+ * source Handle so the assistant → capsule → next-assistant edges attach.
+ *
+ * @param props - React Flow node props whose `data` is a {@link GraphFoldCapsuleData}.
+ */
+export function GraphFoldCapsuleNode({ data }: NodeProps) {
+  const { count, t, onExpand } = data as GraphFoldCapsuleData
+  return (
+    <button
+      type="button"
+      className={css.foldCapsule}
+      aria-label={t('fold.expand')}
+      title={t('fold.expand')}
+      onClick={(event) => {
+        event.stopPropagation()
+        onExpand()
+      }}
+    >
+      <Handle type="target" position={Position.Top} className={css.junctionHandle} isConnectable={false} />
+      <span className={css.foldCapsuleLabel}>{t('fold.collapsedCount', { count })}</span>
+      <span className={css.foldCapsuleIcon} aria-hidden="true">+</span>
+      <Handle type="source" position={Position.Bottom} className={css.junctionHandle} isConnectable={false} />
+    </button>
+  )
+}
+
+/** React Flow node-type registry: the shared card, merge-junction dot, and fold capsule. */
 export const GRAPH_NODE_TYPE = 'graph'
 export const GRAPH_JUNCTION_TYPE = 'graph-junction'
+export const GRAPH_FOLD_TYPE = 'graph-fold'
 export const graphNodeTypes = {
   [GRAPH_NODE_TYPE]: GraphNodeCard,
   [GRAPH_JUNCTION_TYPE]: GraphJunctionNode,
+  [GRAPH_FOLD_TYPE]: GraphFoldCapsuleNode,
 }

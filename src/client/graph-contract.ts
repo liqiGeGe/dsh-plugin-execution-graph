@@ -210,7 +210,11 @@ export interface GraphContainsEdge {
 }
 
 /** Union of every edge kind this package's snapshot builder produces. */
-export type GraphEdge = GraphSequenceEdge | GraphTriggersEdge | GraphResolvesEdge | GraphContainsEdge
+export type GraphEdge =
+  | GraphSequenceEdge
+  | GraphTriggersEdge
+  | GraphResolvesEdge
+  | GraphContainsEdge
 
 /** Target envelope consumed by the graph snapshot builder. */
 export interface GraphConversationViewNode extends ConversationViewNode {

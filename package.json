@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-execution-graph",
-  "description": "DeepSeek Harness plugin: adds an \"Execution graph\" tab to the conversation view that reconstructs a per-turn directed graph of user prompts, model replies, and tool calls/results from session events, with a resizable detail panel, PNG export, and column-merge routing. Pure-consumer client plugin: registers one conversation-view slot entry, declares no service, and reverts every side effect on unload.",
+  "description": "DeepSeek Harness plugin: adds an \"Execution graph\" tab to the conversation view that reconstructs a per-turn directed graph of user prompts, model replies, and tool calls/results from session events, with per-reply folding of tool segments, a resizable payload detail panel, and PNG export. Pure-consumer client plugin: registers one conversation-view slot entry, declares no service, and reverts every side effect on unload.",
   "version": "0.1.3",
   "license": "Apache-2.0",
   "type": "module",

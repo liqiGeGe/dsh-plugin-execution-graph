@@ -24,7 +24,10 @@ export type GraphKey =
   | "detail.command"
   | "sidebar.resize"
   | "sidebar.close"
-  | "export.png";
+  | "export.png"
+  | "fold.collapse"
+  | "fold.expand"
+  | "fold.collapsedCount";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {
@@ -55,6 +58,9 @@ export const zh: Record<GraphKey, string> = {
   "sidebar.resize": "拖拽调整面板宽度",
   "sidebar.close": "关闭详情面板",
   "export.png": "保存为 PNG 图片",
+  "fold.collapse": "收起本轮工具调用",
+  "fold.expand": "展开本轮工具调用",
+  "fold.collapsedCount": "已收起 {{count}} 个节点",
 };
 
 /** English dictionary. */
@@ -79,4 +85,7 @@ export const en: Record<GraphKey, string> = {
   "sidebar.resize": "Drag to resize the panel",
   "sidebar.close": "Close the detail panel",
   "export.png": "Save as PNG image",
+  "fold.collapse": "Collapse this turn's tool calls",
+  "fold.expand": "Expand this turn's tool calls",
+  "fold.collapsedCount": "{{count}} nodes collapsed",
 };
