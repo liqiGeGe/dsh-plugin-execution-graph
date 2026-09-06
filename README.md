@@ -92,11 +92,13 @@ A turn whose timeline runs longer than the column cap (ten steps) wraps into a s
 
 Both buttons set a boolean passed to `layoutGraphSnapshot({ singleColumn })`; toggling re-centers the canvas at scale 1.
 
+Single-column layout is a distinct code path, not a flag threaded through the multi-column one: when `singleColumn` is set, `layoutGraphSnapshot` returns straight edges with `junctions: []` and never calls the merge-junction builder, so no right-angle (step) connector can exist in that mode by construction. The multi-column layout synthesizes a merge junction only when a column's last row holds two or more parallel nodes that all feed the next column's opening node; those connectors render as right-angle step lines and the junction itself as a small dot. Toggling to single column rebuilds the React Flow store (a `key` on the provider), guaranteeing the previous mode's edges and junctions are fully discarded.
+
 ## Model Experience
 
 None, as the graph view renders session data in the browser; nothing here reaches a model request.
 
-#### KV Cache effect
+### KV Cache effect
 
 None; this package neither assembles nor sends a provider request.
 

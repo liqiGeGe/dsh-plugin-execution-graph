@@ -26,6 +26,30 @@ function toolChainSnapshot(count: number): GraphSnapshot {
   return { nodes, edges, runningCallIds: new Set() }
 }
 
+/**
+ * A turn whose column tail (rank 9) holds two parallel tool-calls that both feed
+ * the next-column head (rank 10) assistant message — the exact shape that makes
+ * the multi-column layout synthesize a merge junction and right-angle edges.
+ */
+function parallelMergeAtColumnTail(): GraphSnapshot {
+  const nodes: GraphBusinessNode[] = []
+  const edges: GraphEdge[] = []
+  for (let seq = 1; seq <= 9; seq += 1) {
+    nodes.push({ kind: 'assistant-message', seq, time: seq, turn: 1, step: 1, callIds: [], textPreview: `a${seq}` })
+    if (seq > 1) {
+      edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: String(seq - 1) }, to: { kind: 'assistant-message', id: String(seq) } })
+    }
+  }
+  nodes.push({ kind: 'tool-call', seq: 10, time: 10, turn: 1, step: 1, callId: 'p1', name: 'bash', argsRaw: '{}' })
+  nodes.push({ kind: 'tool-call', seq: 11, time: 11, turn: 1, step: 1, callId: 'p2', name: 'grep', argsRaw: '{}' })
+  nodes.push({ kind: 'assistant-message', seq: 12, time: 12, turn: 1, step: 2, callIds: [], textPreview: 'head' })
+  edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: '9' }, to: { kind: 'tool-call', id: 'p1' } })
+  edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: '9' }, to: { kind: 'tool-call', id: 'p2' } })
+  edges.push({ kind: 'sequence', from: { kind: 'tool-call', id: 'p1' }, to: { kind: 'assistant-message', id: '12' } })
+  edges.push({ kind: 'sequence', from: { kind: 'tool-call', id: 'p2' }, to: { kind: 'assistant-message', id: '12' } })
+  return { nodes, edges, runningCallIds: new Set() }
+}
+
 describe('layoutGraphSnapshot', () => {
   it('returns the empty layout when the snapshot has no non-turn-group nodes', () => {
     const snapshot: GraphSnapshot = {
@@ -253,25 +277,7 @@ describe('layoutGraphSnapshot singleColumn', () => {
   })
 
   it('produces no junction or orthogonal edge for data that forces a merge in multi-column', () => {
-    // Column tail (rank 9) holds two parallel tool-calls that both feed the
-    // next-column head (rank 10) assistant message — exactly the shape that makes
-    // the multi-column layout synthesize a merge junction and right-angle edges.
-    const nodes: GraphBusinessNode[] = []
-    const edges: GraphEdge[] = []
-    for (let seq = 1; seq <= 9; seq += 1) {
-      nodes.push({ kind: 'assistant-message', seq, time: seq, turn: 1, step: 1, callIds: [], textPreview: `a${seq}` })
-      if (seq > 1) {
-        edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: String(seq - 1) }, to: { kind: 'assistant-message', id: String(seq) } })
-      }
-    }
-    nodes.push({ kind: 'tool-call', seq: 10, time: 10, turn: 1, step: 1, callId: 'p1', name: 'bash', argsRaw: '{}' })
-    nodes.push({ kind: 'tool-call', seq: 11, time: 11, turn: 1, step: 1, callId: 'p2', name: 'grep', argsRaw: '{}' })
-    nodes.push({ kind: 'assistant-message', seq: 12, time: 12, turn: 1, step: 2, callIds: [], textPreview: 'head' })
-    edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: '9' }, to: { kind: 'tool-call', id: 'p1' } })
-    edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: '9' }, to: { kind: 'tool-call', id: 'p2' } })
-    edges.push({ kind: 'sequence', from: { kind: 'tool-call', id: 'p1' }, to: { kind: 'assistant-message', id: '12' } })
-    edges.push({ kind: 'sequence', from: { kind: 'tool-call', id: 'p2' }, to: { kind: 'assistant-message', id: '12' } })
-    const snapshot: GraphSnapshot = { nodes, edges, runningCallIds: new Set() }
+    const snapshot = parallelMergeAtColumnTail()
 
     // Sanity: the multi-column path does synthesize a junction for this data.
     const multi = layoutGraphSnapshot(snapshot)
@@ -282,5 +288,53 @@ describe('layoutGraphSnapshot singleColumn', () => {
     expect(single.junctions).toEqual([])
     expect(single.edges.some(edge => edge.orthogonal === true)).toBe(false)
     expect(single.edges.some(edge => edge.source.startsWith('junction:') || edge.target.startsWith('junction:'))).toBe(false)
+  })
+})
+
+describe('layoutGraphSnapshot merge junctions', () => {
+  it('synthesizes one junction named for the column tail that produced it', () => {
+    const layout = layoutGraphSnapshot(parallelMergeAtColumnTail())
+
+    expect(layout.junctions).toHaveLength(1)
+    expect(layout.junctions[0]?.id).toBe('junction:col9')
+  })
+
+  it('centers the junction under its feeding nodes, one row gap below them', () => {
+    const layout = layoutGraphSnapshot(parallelMergeAtColumnTail())
+    const junction = layout.junctions[0]!
+    const p1 = layout.nodes.find(entry => entry.id === 'tool-call:p1')!
+    const p2 = layout.nodes.find(entry => entry.id === 'tool-call:p2')!
+
+    const centerX = (p1.x + p1.width / 2 + p2.x + p2.width / 2) / 2
+    const sourceBottom = Math.max(p1.y + p1.height, p2.y + p2.height)
+    expect(junction.x).toBe(centerX)
+    expect(junction.y).toBe(sourceBottom + 56)
+  })
+
+  it('routes the crossing edges through the junction as orthogonal connectors', () => {
+    const layout = layoutGraphSnapshot(parallelMergeAtColumnTail())
+    const junctionId = layout.junctions[0]!.id
+
+    const orthogonal = layout.edges.filter(edge => edge.orthogonal === true)
+    // 2 feeding nodes → junction, then junction → next-column head (2 crossing edges).
+    expect(orthogonal).toHaveLength(4)
+    expect(orthogonal.filter(edge => edge.target === junctionId)).toHaveLength(2)
+    expect(orthogonal.filter(edge => edge.source === junctionId)).toHaveLength(2)
+  })
+
+  it('drops the original straight crossing edges in favor of the junction route', () => {
+    const layout = layoutGraphSnapshot(parallelMergeAtColumnTail())
+
+    expect(layout.edges.some(edge =>
+      edge.source === 'tool-call:p1' && edge.target === 'assistant-message:12')).toBe(false)
+    expect(layout.edges.some(edge =>
+      edge.source === 'tool-call:p2' && edge.target === 'assistant-message:12')).toBe(false)
+  })
+
+  it('extends the canvas height so the junction dot is not clipped', () => {
+    const layout = layoutGraphSnapshot(parallelMergeAtColumnTail())
+    const junction = layout.junctions[0]!
+
+    expect(layout.height).toBeGreaterThanOrEqual(junction.y + 7)
   })
 })
