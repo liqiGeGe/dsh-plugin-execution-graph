@@ -83,6 +83,15 @@ Folding is an **in-place view transform**, not a re-layout:
 
 Only an assistant message that actually has following tool nodes is foldable — a reply with no tool segment shows no toggle. Folding is per-assistant and independent: collapsing one reply never hides another's segment. Segment ownership is derived from timeline order (`assistantFoldMembers`), and the hidden set plus capsules are computed purely by `foldCapsuleView`.
 
+## Column layout
+
+A turn whose timeline runs longer than the column cap (ten steps) wraps into a second column block to the right. Two buttons next to the turn selector switch this:
+
+- **Single column** (`layout.singleColumn`) — every timeline step renders in one vertical column; row spacing and parallel-sibling spread are unchanged, and the merge junctions that route cross-column edges are dropped because nothing wraps.
+- **Restore default** (`layout.default`) — back to the wrapped multi-column layout with merge junctions.
+
+Both buttons set a boolean passed to `layoutGraphSnapshot({ singleColumn })`; toggling re-centers the canvas at scale 1.
+
 ## Model Experience
 
 None, as the graph view renders session data in the browser; nothing here reaches a model request.

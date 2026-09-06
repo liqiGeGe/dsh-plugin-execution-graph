@@ -27,7 +27,9 @@ export type GraphKey =
   | "export.png"
   | "fold.collapse"
   | "fold.expand"
-  | "fold.collapsedCount";
+  | "fold.collapsedCount"
+  | "layout.singleColumn"
+  | "layout.default";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {
@@ -61,6 +63,8 @@ export const zh: Record<GraphKey, string> = {
   "fold.collapse": "收起本轮工具调用",
   "fold.expand": "展开本轮工具调用",
   "fold.collapsedCount": "已收起 {{count}} 个节点",
+  "layout.singleColumn": "全部一列",
+  "layout.default": "恢复默认",
 };
 
 /** English dictionary. */
@@ -88,4 +92,6 @@ export const en: Record<GraphKey, string> = {
   "fold.collapse": "Collapse this turn's tool calls",
   "fold.expand": "Expand this turn's tool calls",
   "fold.collapsedCount": "{{count}} nodes collapsed",
+  "layout.singleColumn": "Single column",
+  "layout.default": "Restore default",
 };

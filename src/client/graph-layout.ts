@@ -152,32 +152,38 @@ function computeRanks(
   return rank;
 }
 
-/**
- * Position one session-turn's activity as a vertical timeline for React Flow.
- * Turn-group nodes are dropped: only one turn is shown at a time, so its
- * container box would be redundant chrome. Every other node is ranked by
- * {@link computeRanks} into timeline steps stacked top-to-bottom; a step's
- * parallel siblings spread horizontally, and after {@link ROWS_PER_COLUMN}
- * steps the timeline wraps into the next column block to the right. `x`/`y`
- * are top-left corners; edges carry React Flow source/target ids.
- *
- * @param snapshot - Graph snapshot to lay out (already narrowed to one turn).
- * @returns Positioned nodes/edges and the overall canvas size.
- */
-export function layoutGraphSnapshot(snapshot: GraphSnapshot): GraphLayout {
-  const placed = snapshot.nodes.filter((node) => node.kind !== "turn-group");
-  if (placed.length === 0) return EMPTY_LAYOUT;
+/** Column-layout control for one timeline. */
+export interface GraphLayoutOptions {
+  /**
+   * Render every timeline step in a single vertical column instead of wrapping
+   * into new column blocks every {@link ROWS_PER_COLUMN} steps. Single-column
+   * layout never produces merge junctions — its code path never constructs them.
+   */
+  readonly singleColumn?: boolean;
+}
 
-  const rank = computeRanks(placed, snapshot);
-  const rows = new Map<number, GraphCardNode[]>();
-  for (const node of placed) {
-    // Every placed node was seeded in `rank` by computeRanks.
-    pushToBucket(rows, rank.get(nodeElementId(node)) as number, node);
-  }
-
-  const rowWidth = (members: readonly GraphCardNode[]): number =>
-    members.reduce((sum, member) => sum + nodeWidth(member), 0) +
+/** Total width of a row's parallel siblings, including the gaps between them. */
+function rowWidth(members: readonly GraphCardNode[]): number {
+  return members.reduce((sum, member) => sum + nodeWidth(member), 0) +
     SIBLING_GAP * (members.length - 1);
+}
+
+/**
+ * Place ranked rows into positioned nodes. `columnOf`/`rowOf` select the column
+ * block and in-block row for each rank, so single-column and multi-column modes
+ * share the horizontal-spread math while choosing entirely different block
+ * assignments.
+ *
+ * @param rows - Rank → parallel siblings bucket.
+ * @param columnOf - Rank → column block index.
+ * @param rowOf - Rank → row index within its block.
+ * @returns Positioned nodes and the bounding max x/y before junction extent.
+ */
+function placeTimeline(
+  rows: ReadonlyMap<number, readonly GraphCardNode[]>,
+  columnOf: (rank: number) => number,
+  rowOf: (rank: number) => number,
+): { positioned: PositionedGraphNode[]; maxX: number; maxY: number } {
   const columnStride =
     Math.max(...[...rows.values()].map(rowWidth)) + COLUMN_GAP;
   const maxRowWidth = columnStride - COLUMN_GAP;
@@ -186,9 +192,8 @@ export function layoutGraphSnapshot(snapshot: GraphSnapshot): GraphLayout {
   let maxX = 0;
   let maxY = 0;
   for (const [nodeRank, members] of rows) {
-    const columnBlock = Math.floor(nodeRank / ROWS_PER_COLUMN);
-    const rowInColumn = nodeRank % ROWS_PER_COLUMN;
-    const y = rowInColumn * (NODE_HEIGHT + ROW_GAP);
+    const columnBlock = columnOf(nodeRank);
+    const y = rowOf(nodeRank) * (NODE_HEIGHT + ROW_GAP);
     const blockCenterX = columnBlock * columnStride + maxRowWidth / 2;
     const ordered = [...members].sort(
       (left, right) => horizontalOrder(left) - horizontalOrder(right),
@@ -209,64 +214,74 @@ export function layoutGraphSnapshot(snapshot: GraphSnapshot): GraphLayout {
       cursorX += width + SIBLING_GAP;
     }
   }
+  return { positioned, maxX, maxY };
+}
 
+/**
+ * The causal edges between the placed nodes, minus the assistant-message →
+ * assistant-message `sequence` chrome that conveys ordering but should not be
+ * drawn (ranking already consumed it). `contains` edges are layout-irrelevant.
+ *
+ * @param snapshot - Snapshot supplying the raw edges.
+ * @param positioned - Placed nodes whose ids form the kept endpoint set.
+ * @returns Drawable edges in arbitrary order.
+ */
+function causalEdgesOf(
+  snapshot: GraphSnapshot,
+  positioned: readonly PositionedGraphNode[],
+): Exclude<GraphEdge, GraphContainsEdge>[] {
   const ids = new Set(positioned.map((entry) => entry.id));
-  const positionById = new Map(positioned.map((entry) => [entry.id, entry]));
-  const rankById = rank;
   const kindById = new Map(positioned.map((entry) => [entry.id, entry.node.kind]));
-
-  // Consecutive assistant-message ("模型回复") nodes are chained by a `sequence`
-  // edge only to convey ordering; drawing that connector clutters the timeline,
-  // so it is dropped from rendering (ranking already used it, via computeRanks).
-  const isAssistantToAssistantSequence = (
-    edge: Exclude<GraphEdge, GraphContainsEdge>,
-  ): boolean =>
-    edge.kind === "sequence" &&
-    kindById.get(endpointElementId(edge.from)) === "assistant-message" &&
-    kindById.get(endpointElementId(edge.to)) === "assistant-message";
-
-  const causalEdges = snapshot.edges.filter(
+  return snapshot.edges.filter(
     (edge): edge is Exclude<GraphEdge, GraphContainsEdge> =>
       edge.kind !== "contains" &&
       ids.has(endpointElementId(edge.from)) &&
       ids.has(endpointElementId(edge.to)) &&
-      !isAssistantToAssistantSequence(edge),
+      !(
+        edge.kind === "sequence" &&
+        kindById.get(endpointElementId(edge.from)) === "assistant-message" &&
+        kindById.get(endpointElementId(edge.to)) === "assistant-message"
+      ),
   );
+}
 
-  // A rank is a column's last row when it is the deepest row of its block.
-  const isColumnTail = (nodeRank: number): boolean =>
-    nodeRank % ROWS_PER_COLUMN === ROWS_PER_COLUMN - 1;
-
-  // Nodes by rank, to find a column-tail row holding several parallel nodes.
+/**
+ * Build the merge junctions and the edge rerouting they require, for the
+ * multi-column layout only. When a column's last row holds several parallel
+ * nodes that all feed the next column's opening node, their connectors converge
+ * on one junction dot, which then bends into that next-column node.
+ *
+ * @param positioned - Placed nodes (for coordinates and rank lookup).
+ * @param rank - Rank per node element id.
+ * @param causal - Drawable edges to reroute across column boundaries.
+ * @returns The junctions and every edge (rerouted `orthogonal` ones plus the
+ * unrerouted causal edges).
+ */
+function buildMergeJunctions(
+  positioned: readonly PositionedGraphNode[],
+  rank: ReadonlyMap<string, number>,
+  causal: readonly Exclude<GraphEdge, GraphContainsEdge>[],
+): { edges: PositionedGraphEdge[]; junctions: GraphJunction[] } {
+  const positionById = new Map(positioned.map((entry) => [entry.id, entry]));
   const nodesByRank = new Map<number, string[]>();
   for (const entry of positioned) {
-    pushToBucket(nodesByRank, rankById.get(entry.id) as number, entry.id);
+    pushToBucket(nodesByRank, rank.get(entry.id) as number, entry.id);
   }
 
   const junctions: GraphJunction[] = [];
-  // Cross-column edges (tail-row node → next-column node) rerouted via a junction,
-  // keyed by the edge's source→target ids so we skip drawing them straight later.
   const reroutedEdgeKeys = new Set<string>();
   const edges: PositionedGraphEdge[] = [];
 
   for (const [tailRank, tailIds] of nodesByRank) {
-    if (!isColumnTail(tailRank) || tailIds.length < 2) continue;
-    // Cross-column edges leaving this tail row: source in the tail, target in the
-    // next column (rank one deeper, which wraps to the next block's first row).
-    const crossing = causalEdges.filter((edge) => {
+    if (tailRank % ROWS_PER_COLUMN !== ROWS_PER_COLUMN - 1 || tailIds.length < 2) continue;
+    const crossing = causal.filter((edge) => {
       const source = endpointElementId(edge.from);
       const target = endpointElementId(edge.to);
-      return (
-        tailIds.includes(source) &&
-        (rankById.get(target) as number) === tailRank + 1
-      );
+      return tailIds.includes(source) && rank.get(target) === tailRank + 1;
     });
-    // Need at least two tail nodes actually feeding the next column to merge.
     const feedingSources = new Set(crossing.map((edge) => endpointElementId(edge.from)));
     if (feedingSources.size < 2) continue;
 
-    // One junction for the whole tail row, centered under its feeding nodes and
-    // sitting just below the row, so the parallel outputs visually converge first.
     const sourceNodes = [...feedingSources].map(
       (id) => positionById.get(id) as PositionedGraphNode,
     );
@@ -279,8 +294,6 @@ export function layoutGraphSnapshot(snapshot: GraphSnapshot): GraphLayout {
     const junctionId = `junction:col${tailRank}`;
     junctions.push({ id: junctionId, x: junctionX, y: sourceBottom + ROW_GAP });
 
-    // Each feeding tail node → junction (right-angle), then junction → every
-    // next-column target (right-angle), so the merge fans back out cleanly.
     for (const source of feedingSources) {
       const anyEdge = crossing.find((edge) => endpointElementId(edge.from) === source);
       edges.push({
@@ -303,12 +316,67 @@ export function layoutGraphSnapshot(snapshot: GraphSnapshot): GraphLayout {
     }
   }
 
-  for (const edge of causalEdges) {
+  for (const edge of causal) {
     const source = endpointElementId(edge.from);
     const target = endpointElementId(edge.to);
     if (reroutedEdgeKeys.has(`${source}->${target}`)) continue;
     edges.push({ edge, source, target });
   }
+
+  return { edges, junctions };
+}
+
+/**
+ * Position one session-turn's activity as a vertical timeline for React Flow.
+ * Turn-group nodes are dropped: only one turn is shown at a time, so its
+ * container box would be redundant chrome. Every other node is ranked by
+ * {@link computeRanks} into timeline steps stacked top-to-bottom; a step's
+ * parallel siblings spread horizontally, and after {@link ROWS_PER_COLUMN}
+ * steps the timeline wraps into the next column block to the right.
+ *
+ * When {@link GraphLayoutOptions.singleColumn} is set, the layout takes a
+ * distinct code path that keeps every rank in one vertical column and never
+ * calls {@link buildMergeJunctions}, so the result has `junctions: []` and no
+ * `orthogonal` edges by construction. `x`/`y` are top-left corners; edges carry
+ * React Flow source/target ids.
+ *
+ * @param snapshot - Graph snapshot to lay out (already narrowed to one turn).
+ * @param options - Optional column-layout control.
+ * @returns Positioned nodes/edges and the overall canvas size.
+ */
+export function layoutGraphSnapshot(
+  snapshot: GraphSnapshot,
+  options: GraphLayoutOptions = {},
+): GraphLayout {
+  const { singleColumn = false } = options
+  const placed = snapshot.nodes.filter((node) => node.kind !== "turn-group");
+  if (placed.length === 0) return EMPTY_LAYOUT;
+
+  const rank = computeRanks(placed, snapshot);
+  const rows = new Map<number, GraphCardNode[]>();
+  for (const node of placed) {
+    // Every placed node was seeded in `rank` by computeRanks.
+    pushToBucket(rows, rank.get(nodeElementId(node)) as number, node);
+  }
+
+  const { positioned, maxX, maxY } = placeTimeline(
+    rows,
+    singleColumn ? () => 0 : (nodeRank) => Math.floor(nodeRank / ROWS_PER_COLUMN),
+    singleColumn ? (nodeRank) => nodeRank : (nodeRank) => nodeRank % ROWS_PER_COLUMN,
+  );
+  const causal = causalEdgesOf(snapshot, positioned);
+
+  // Single-column: straight edges only, no junction construction at all.
+  if (singleColumn) {
+    const edges: PositionedGraphEdge[] = causal.map((edge) => ({
+      edge,
+      source: endpointElementId(edge.from),
+      target: endpointElementId(edge.to),
+    }));
+    return { nodes: positioned, edges, junctions: [], width: maxX, height: maxY };
+  }
+
+  const { edges, junctions } = buildMergeJunctions(positioned, rank, causal);
 
   // Junctions sit below their column-tail row, so extend the canvas extent to
   // include them; otherwise the PNG export (sized from width/height) clips them.

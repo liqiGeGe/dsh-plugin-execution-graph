@@ -217,3 +217,70 @@ describe('layoutGraphSnapshot', () => {
     expect(wrapped.width).toBeGreaterThan(single.width)
   })
 })
+
+describe('layoutGraphSnapshot singleColumn', () => {
+  it('keeps a long chain in one vertical column when singleColumn is set', () => {
+    const layout = layoutGraphSnapshot(toolChainSnapshot(14), { singleColumn: true })
+
+    const calls = layout.nodes
+      .filter(positioned => positioned.node.kind === 'tool-call')
+      .sort((left, right) => (left.node as { seq: number }).seq - (right.node as { seq: number }).seq)
+    expect(calls).toHaveLength(14)
+    const xs = new Set(calls.map(positioned => positioned.x))
+    expect(xs.size).toBe(1)
+    // Rows stack top to bottom without wrapping.
+    const ys = calls.map(positioned => positioned.y)
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys)
+  })
+
+  it('emits no junctions in singleColumn mode', () => {
+    const layout = layoutGraphSnapshot(toolChainSnapshot(20), { singleColumn: true })
+    expect(layout.junctions).toEqual([])
+  })
+
+  it('single column is narrower but taller than the default wrapped layout', () => {
+    const multi = layoutGraphSnapshot(toolChainSnapshot(14))
+    const single = layoutGraphSnapshot(toolChainSnapshot(14), { singleColumn: true })
+
+    expect(single.width).toBeLessThan(multi.width)
+    expect(single.height).toBeGreaterThan(multi.height)
+  })
+
+  it('ignores singleColumn option when omitted (default wrapped layout preserved)', () => {
+    const layout = layoutGraphSnapshot(toolChainSnapshot(12))
+    const xs = new Set(layout.nodes.map(positioned => positioned.x))
+    expect(xs.size).toBeGreaterThan(1)
+  })
+
+  it('produces no junction or orthogonal edge for data that forces a merge in multi-column', () => {
+    // Column tail (rank 9) holds two parallel tool-calls that both feed the
+    // next-column head (rank 10) assistant message — exactly the shape that makes
+    // the multi-column layout synthesize a merge junction and right-angle edges.
+    const nodes: GraphBusinessNode[] = []
+    const edges: GraphEdge[] = []
+    for (let seq = 1; seq <= 9; seq += 1) {
+      nodes.push({ kind: 'assistant-message', seq, time: seq, turn: 1, step: 1, callIds: [], textPreview: `a${seq}` })
+      if (seq > 1) {
+        edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: String(seq - 1) }, to: { kind: 'assistant-message', id: String(seq) } })
+      }
+    }
+    nodes.push({ kind: 'tool-call', seq: 10, time: 10, turn: 1, step: 1, callId: 'p1', name: 'bash', argsRaw: '{}' })
+    nodes.push({ kind: 'tool-call', seq: 11, time: 11, turn: 1, step: 1, callId: 'p2', name: 'grep', argsRaw: '{}' })
+    nodes.push({ kind: 'assistant-message', seq: 12, time: 12, turn: 1, step: 2, callIds: [], textPreview: 'head' })
+    edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: '9' }, to: { kind: 'tool-call', id: 'p1' } })
+    edges.push({ kind: 'sequence', from: { kind: 'assistant-message', id: '9' }, to: { kind: 'tool-call', id: 'p2' } })
+    edges.push({ kind: 'sequence', from: { kind: 'tool-call', id: 'p1' }, to: { kind: 'assistant-message', id: '12' } })
+    edges.push({ kind: 'sequence', from: { kind: 'tool-call', id: 'p2' }, to: { kind: 'assistant-message', id: '12' } })
+    const snapshot: GraphSnapshot = { nodes, edges, runningCallIds: new Set() }
+
+    // Sanity: the multi-column path does synthesize a junction for this data.
+    const multi = layoutGraphSnapshot(snapshot)
+    expect(multi.junctions.length).toBe(1)
+
+    // Single-column path never constructs junctions or right-angle edges.
+    const single = layoutGraphSnapshot(snapshot, { singleColumn: true })
+    expect(single.junctions).toEqual([])
+    expect(single.edges.some(edge => edge.orthogonal === true)).toBe(false)
+    expect(single.edges.some(edge => edge.source.startsWith('junction:') || edge.target.startsWith('junction:'))).toBe(false)
+  })
+})

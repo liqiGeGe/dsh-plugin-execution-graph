@@ -218,6 +218,9 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
   const [pickedTurn, setPickedTurn] = useState<number | null>(null)
   // Element ids of assistant-message nodes whose follower tool segments are hidden.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  // When true, every timeline step renders in one vertical column (no column
+  // wrapping at ROWS_PER_COLUMN and no merge junctions).
+  const [singleColumn, setSingleColumn] = useState(false)
   const lastTurn = useMemo(
     () => snapshot.nodes.reduce((max, node) => Math.max(max, node.turn), 0),
     [snapshot],
@@ -228,7 +231,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
   // in-place view transform (hide follower nodes + insert a capsule), so column
   // assignment, node coordinates, and the viewport all stay stable across
   // fold/expand toggles.
-  const layout = useMemo(() => layoutGraphSnapshot(filtered), [filtered])
+  const layout = useMemo(() => layoutGraphSnapshot(filtered, { singleColumn }), [filtered, singleColumn])
   const foldMembers = useMemo(() => assistantFoldMembers(filtered), [filtered])
   const foldableAssistantIds = useMemo(
     () => new Set(
@@ -283,7 +286,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
             },
           }
         }),
-      ...layout.junctions.map((junction): Node => ({
+      ...(!singleColumn ? layout.junctions.map((junction): Node => ({
         id: junction.id,
         type: GRAPH_JUNCTION_TYPE,
         // React Flow positions by top-left; center the JUNCTION_SIZE dot on (x, y).
@@ -293,7 +296,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
         selectable: false,
         draggable: false,
         data: {},
-      })),
+      })) : []),
       ...foldView.capsules.map((capsule): Node<GraphFoldCapsuleData> => {
         // Position the capsule directly below the collapsed assistant card,
         // centered on the assistant's column so the fold stays in place.
@@ -317,11 +320,19 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
         }
       }),
     ],
-    [layout, filtered, t, foldableAssistantIds, effectiveCollapsed, foldMembers, foldView],
+    [layout, filtered, t, foldableAssistantIds, effectiveCollapsed, foldMembers, foldView, singleColumn],
   )
   const flowEdges = useMemo<Edge[]>(
     () => {
       const edges: Edge[] = layout.edges
+        // Single-column: never draw a merge-junction right-angle connector, even
+        // if the layout somehow emitted one — drop any edge touching a junction
+        // endpoint or marked orthogonal outright.
+        .filter(positioned =>
+          !singleColumn
+          || (!positioned.orthogonal
+            && !positioned.source.startsWith('junction:')
+            && !positioned.target.startsWith('junction:')))
         // Drop any edge whose endpoint is hidden inside a folded segment.
         .filter(positioned =>
           !foldView.hiddenIds.has(positioned.source) && !foldView.hiddenIds.has(positioned.target))
@@ -333,7 +344,11 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
             source: positioned.source,
             target: positioned.target,
             style: { stroke, strokeWidth: 1.5 },
-            ...(positioned.orthogonal === true ? { type: 'step', pathOptions: { borderRadius: 0 } } : {}),
+            // Merge-junction connectors (multi-column only) render as right-angle
+            // step lines. Single-column never reaches this branch.
+            ...(positioned.orthogonal === true
+              ? { type: 'step', pathOptions: { borderRadius: 0 } }
+              : {}),
             ...(toJunction ? {} : { markerEnd: { type: MarkerType.ArrowClosed, color: stroke } }),
           }
         })
@@ -359,7 +374,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
       }
       return edges
     },
-    [layout, foldView],
+    [layout, foldView, singleColumn],
   )
 
   const selected = useMemo(
@@ -384,10 +399,26 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
           onChange={(turn) => { setPickedTurn(turn); setSelectedId(null) }}
           t={t}
         />
+        <button
+          type="button"
+          className={singleColumn ? `${css.layoutToggle} ${css.layoutToggleActive}` : css.layoutToggle}
+          aria-pressed={singleColumn}
+          onClick={() => { setSingleColumn(true) }}
+        >
+          {t('layout.singleColumn')}
+        </button>
+        <button
+          type="button"
+          className={css.layoutToggle}
+          aria-pressed={!singleColumn}
+          onClick={() => { setSingleColumn(false) }}
+        >
+          {t('layout.default')}
+        </button>
       </div>
       <div className={css.body}>
-        <div className={css.canvas} role="img" aria-label={t('legend.aria')}>
-          <ReactFlowProvider>
+        <div className={css.canvas} role="img" aria-label={t('legend.aria')} data-layout-mode={singleColumn ? 'single' : 'multi'}>
+          <ReactFlowProvider key={`${singleColumn ? 'single' : 'multi'}`}>
             <ReactFlow
               nodes={flowNodes}
               edges={flowEdges}
@@ -399,7 +430,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
               onNodeClick={(_event, node) => { setSelectedId(node.id); sidebar.expand() }}
               onPaneClick={() => { setSelectedId(null) }}
             >
-              <ViewportController resetKey={selectedTurn} width={layout.width} height={layout.height} />
+              <ViewportController resetKey={`${selectedTurn}:${singleColumn ? 'single' : 'multi'}`} width={layout.width} height={layout.height} />
               <Background />
               <Controls showInteractive={false} position="bottom-right" />
             </ReactFlow>

@@ -28,6 +28,31 @@
   border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
+/* Column-layout toggle (single column vs. default multi-column). */
+.layoutToggle {
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.layoutToggle:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.layoutToggleActive,
+.layoutToggleActive:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-label-primary);
+}
+
 .turnSelect {
   display: flex;
   align-items: center;
