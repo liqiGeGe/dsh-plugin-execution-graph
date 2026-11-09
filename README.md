@@ -4,6 +4,21 @@ English | [中文](README.zh.md)
 
 A DeepSeek Harness (DSH) client plugin that adds an **"Execution graph"** tab to the conversation view. It reconstructs one session turn's activity as a vertical timeline on a [React Flow](https://reactflow.dev) canvas: the turn's `request-header`, `assistant-message`, `tool-call`, and `tool-result` nodes are ranked into timeline steps stacked top-to-bottom and connected by arrowed edges from each step to the next. `turn-group` container nodes are not drawn — one turn is shown at a time (defaulting to the session's last), so a container box would be redundant. Tool calls are never merged by name — each call and its result are independent nodes tied by a `resolves` edge, an assistant message's tool-call blocks connect to their `tool-call` nodes by a `triggers` edge, and same-group nodes chain by a `sequence` edge in event order. Parallel tool calls triggered by one assistant message share a timeline step and spread horizontally; a column is capped at ten steps and then wraps into the next column block to the right, and when a column's last row holds several parallel nodes feeding the next column, their connectors converge through a merge junction before bending into the next column. A running tool call (present in the shared Session window's running-call-id set, with no settled result yet) renders with a distinct dashed, pulsing border instead of a fabricated result. A `tool-call` card puts its `Tool` kind label and tool name on one row and a truncated argument preview on the next. Selecting a node fills a persistent detail sidebar to the right — resizable (320–600px, collapsible) — that shows a `Payload` JSON tree for tool calls and a line-broken command block for shell commands. A turn selector above the canvas lists every turn and defaults to the last; switching turns re-centers the canvas at scale 1. A download button in the canvas's lower-left corner exports the whole graph as a PNG. Each `assistant-message` card carries a fold toggle on its right edge: collapsing hides the tool calls/results that follow it up to the next assistant message (an in-place view transform — columns and coordinates stay fixed), leaving a fold capsule that bridges the collapsed reply to the next one and can be clicked to expand. The package provides no service and declares no Context merge; it registers target-specific Conversation Event Definitions, a Graph view snapshot builder, and one tab in the conversation's `'conversation.view'` slot ring.
 
+## Compatibility
+
+Install the plugin version that matches your DSH runtime. The package's
+`peerDependencies` pin the client APIs it was built against, so `dsh plugin`
+rejects a mismatched pair instead of loading a plugin built for another client
+line.
+
+| DSH runtime | Plugin version | Status |
+| --- | --- | --- |
+| `0.2.x` (client peers `^0.2.2-rc.1`) | `0.2.x` — tag `v0.2.0` | current |
+| `0.1.x` (client peers `^0.1.1-rc.2`) | `0.1.x` — tag `v0.1.4` | maintenance only |
+
+A bare `dsh-plugin-execution-graph` install resolves to the registry's `latest`
+tag, so pin the version explicitly (see [Installation](#installation)).
+
 ## Plugin results
 
 ![graph-detail](./resource/image/graph-detail.png)
@@ -42,7 +57,15 @@ The plugin has **no user-configurable options** and takes no `config:` block; it
 Install into a profile with `dsh plugin`, which reads the package's `dsh.bundle` manifest:
 
 ```sh
-dsh plugin --profile <name> add dsh-plugin-execution-graph
+# match the line to your DSH runtime (see Compatibility)
+dsh plugin --profile <name> add dsh-plugin-execution-graph@0.2.0
+```
+
+If the registry has not published `0.2.0` yet, install it from the GitHub tag
+instead:
+
+```sh
+dsh plugin --profile <name> add github:liqiGeGe/dsh-plugin-execution-graph#v0.2.0
 ```
 
 The bundle's `cordis.patch.yml` appends one row to the client roster:
@@ -57,7 +80,7 @@ Because the plugin has no config options, users do not edit `cordis.patch.yml` t
 
 ### Requirements
 
-- A DSH runtime hosting the client web surface (the `dsh` CLI with a web-enabled profile) on the **0.2.x line** — i.e. the DSH core packages (`@deepseek-ai/dsh-client-*`, `@deepseek-ai/dsh-*`) at `^0.2.2-rc.1` with `@deepseek-ai/cordis` at `^4.0.1`, exactly as declared in this package's `peerDependencies`.
+- A DSH runtime hosting the client web surface (the `dsh` CLI with a web-enabled profile) on the **0.2.x line**, paired with plugin `0.2.x` (see [Compatibility](#compatibility)) — i.e. the DSH core packages (`@deepseek-ai/dsh-client-*`, `@deepseek-ai/dsh-*`) at `^0.2.2-rc.1` with `@deepseek-ai/cordis` at `^4.0.1`, exactly as declared in this package's `peerDependencies`.
 - `@deepseek-ai/dsh-client-ui-primitives` and `@deepseek-ai/dsh-client-ui-slots` are **not** peer dependencies: they are platform modules the DSH host shares into its frozen module table, so the plugin's client bundle imports them as externals resolved by the host.
 - Node.js ≥ 22 and pnpm for a from-source checkout.
 

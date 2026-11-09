@@ -4,6 +4,17 @@
 
 一个 DeepSeek Harness（DSH）客户端插件，为会话视图新增一个**「执行图」**标签页。它把一个会话轮次的活动重建为 [React Flow](https://reactflow.dev) 画布上的纵向时间轴：该轮次的 `request-header`、`assistant-message`、`tool-call` 与 `tool-result` 节点被排入自上而下堆叠的时间步，并以带箭头的边从上一步指向下一步。`turn-group` 容器节点不再绘制——每次只展示一个轮次（默认当前会话的最后一轮），容器方框已属冗余。工具调用不会按名称合并——每次调用及其结果都是独立节点，通过 `resolves` 边配对；助手消息中的工具调用块通过 `triggers` 边连接到对应的 `tool-call` 节点；同一分组内的节点按事件发生顺序通过 `sequence` 边相连。由同一条助手消息触发的并行工具调用共享一个时间步并在水平方向铺开；单列最多十个时间步，超出后换到右侧下一列，并且当某列最后一行有多个并行节点汇入下一列时，它们的连线会先经过一个汇聚圆点再折入下一列。正在运行的工具调用（存在于共享 Session 窗口的运行中调用 id 集合、尚无已完结结果）会渲染为独立的虚线脉动边框，而不会虚构一个结果。`tool-call` 卡片把 `工具` 类型标签与工具名放在同一行，参数缩略预览放在第二行。选中节点会在右侧填充一个常驻详情侧栏——可拖拽调整宽度（320–600px，可折叠）——工具调用显示 `Payload` JSON 树，shell 命令显示按行拆分的命令块。画布上方的轮次选择框列出每个轮次并默认最后一轮；切换轮次会把画布以 scale 1 重新居中。画布左下角的下载按钮可将整张执行图导出为 PNG。每条 `assistant-message` 卡片右侧都有一个折叠开关：折叠会隐藏紧随其后、直到下一条模型回复之间的工具调用与结果（这是就地视图变换——列与坐标保持不变），留下一个可点击展开的折叠胶囊，把被折叠的回复与下一条模型回复桥接起来。该包不提供 service，也不声明 Context 合并；它会注册 target 专属 Conversation Event Definition、Graph 视图快照构建器，以及会话 `'conversation.view'` slot 环中的一个视图标签页。
 
+## 兼容性
+
+请安装与当前 DSH 运行时匹配的插件版本。包的 `peerDependencies` 固定了它编译时使用的客户端 API，版本不匹配时 `dsh plugin` 会直接拒绝安装，而不是把为另一条客户端线构建的插件加载进来。
+
+| DSH 运行时 | 插件版本 | 状态 |
+| --- | --- | --- |
+| `0.2.x`（客户端 peer 为 `^0.2.2-rc.1`） | `0.2.x` — tag `v0.2.0` | 当前 |
+| `0.1.x`（客户端 peer 为 `^0.1.1-rc.2`） | `0.1.x` — tag `v0.1.4` | 仅维护 |
+
+直接安装 `dsh-plugin-execution-graph` 会取 registry 的 `latest` 标签，因此请显式指定版本（见[安装方式](#安装方式)）。
+
 ## 运行效果
 
 ![graph-detail](./resource/image/graph-detail.png)
@@ -42,7 +53,14 @@
 用 `dsh plugin` 把插件安装到 profile，它会读取包的 `dsh.bundle` 清单：
 
 ```sh
-dsh plugin --profile <name> add dsh-plugin-execution-graph
+# 按你的 DSH 运行时选择版本（见上方「兼容性」）
+dsh plugin --profile <name> add dsh-plugin-execution-graph@0.2.0
+```
+
+如果 registry 上还没有 `0.2.0`，可以直接从 GitHub tag 安装：
+
+```sh
+dsh plugin --profile <name> add github:liqiGeGe/dsh-plugin-execution-graph#v0.2.0
 ```
 
 bundle 的 `cordis.patch.yml` 向客户端名册追加一行：
@@ -57,7 +75,7 @@ bundle 的 `cordis.patch.yml` 向客户端名册追加一行：
 
 ### 前置要求
 
-- 承载客户端 web 表面的 DSH 运行时（带 web 配置的 `dsh` CLI），且运行在 **0.2.x 线**上——即 DSH 核心包（`@deepseek-ai/dsh-client-*`、`@deepseek-ai/dsh-*`）为 `^0.2.2-rc.1`、`@deepseek-ai/cordis` 为 `^4.0.1`，与本包 `peerDependencies` 声明完全一致。
+- 承载客户端 web 表面的 DSH 运行时（带 web 配置的 `dsh` CLI），且运行在 **0.2.x 线**上，并搭配插件 `0.2.x`（见[兼容性](#兼容性)）——即 DSH 核心包（`@deepseek-ai/dsh-client-*`、`@deepseek-ai/dsh-*`）为 `^0.2.2-rc.1`、`@deepseek-ai/cordis` 为 `^4.0.1`，与本包 `peerDependencies` 声明完全一致。
 - `@deepseek-ai/dsh-client-ui-primitives` 与 `@deepseek-ai/dsh-client-ui-slots` **不是** peer 依赖：它们是 DSH host 共享进冻结模块表的 platform module，插件的 client bundle 以外部引用方式由 host 解析。
 - 从源码构建需要 Node.js ≥ 22 与 pnpm。
 
