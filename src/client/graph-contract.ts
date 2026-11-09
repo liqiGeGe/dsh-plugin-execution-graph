@@ -59,7 +59,12 @@ export interface GraphAssistantMessageNode {
   readonly turn: number
   readonly step: number
   readonly callIds: readonly string[]
+  /** Visible reply text joined in block order; empty when the reply was tool-calls only. */
   readonly textPreview: string
+  /** Reasoning stream joined in block order, when the provider emitted one. */
+  readonly reasoning?: string
+  /** Names of the tool calls this reply triggered, in block order. */
+  readonly toolNames?: readonly string[]
 }
 
 /** One `tool/call` event, never merged with any other call by tool name. */

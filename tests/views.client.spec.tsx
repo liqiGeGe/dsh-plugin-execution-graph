@@ -16,6 +16,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps, ComponentType, MouseEvent } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+
+const { setCenterMock } = vi.hoisted(() => ({ setCenterMock: vi.fn() }))
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { stubConfigForm, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
@@ -27,7 +29,8 @@ import { apply as localeApply, inject as localeInject } from '@deepseek-ai/dsh-c
 import { apply, inject } from '../src/client/index.ts'
 import { apply as nodeApply } from '../src/index.ts'
 import { GraphView } from '../src/client/GraphView.tsx'
-import { zh } from '../src/client/locales.ts'
+import { layoutGraphSnapshot } from '../src/client/graph-layout.ts'
+import { en, zh } from '../src/client/locales.ts'
 import type { GraphSnapshot } from '../src/client/graph-contract.ts'
 import css from '../src/client/GraphView.module.css'
 
@@ -39,15 +42,16 @@ import css from '../src/client/GraphView.module.css'
 vi.mock('@xyflow/react', () => {
   interface MockNode { id: string; type: string; data: unknown }
   interface MockEdge { id: string; source: string; target: string }
-  const ReactFlow = ({ nodes, edges, nodeTypes, onNodeClick, onPaneClick, children }: {
+  const ReactFlow = ({ nodes, edges, nodeTypes, onNodeClick, onPaneClick, minZoom, children }: {
     nodes: MockNode[]
     edges: MockEdge[]
     nodeTypes: Record<string, ComponentType<{ data: unknown }>>
     onNodeClick?: (event: MouseEvent, node: MockNode) => void
     onPaneClick?: () => void
+    minZoom?: number
     children?: unknown
   }) => (
-    <div data-testid="rf">
+    <div data-testid="rf" data-min-zoom={minZoom === undefined ? undefined : String(minZoom)}>
       <button type="button" data-testid="rf-pane" onClick={() => onPaneClick?.()}>pane</button>
       {nodes.map((node) => {
         const Card = nodeTypes[node.type]!
@@ -72,16 +76,33 @@ vi.mock('@xyflow/react', () => {
     ReactFlow,
     ReactFlowProvider: ({ children }: { children: unknown }) => <>{children as never}</>,
     Background: () => null,
-    Controls: () => null,
+    Controls: ({ children }: { children?: unknown }) => <div data-testid="rf-controls">{children as never}</div>,
     Handle: () => null,
     Position: { Top: 'top', Bottom: 'bottom' },
     MarkerType: { ArrowClosed: 'arrowclosed' },
-    // ViewportController (rendered inside the provider) calls useReactFlow.
-    useReactFlow: () => ({ setCenter: () => {} }),
+    // ViewportController and ScrollTopButton (rendered inside the provider) call useReactFlow.
+    useReactFlow: () => ({ setCenter: setCenterMock, getZoom: () => 1 }),
   }
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  setCenterMock.mockClear()
+  delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard
+  sessionState = { hasMore: false, loadingOlder: false }
+  loadOlder = vi.fn(() => Promise.resolve())
+})
+
+/** jsdom has no clipboard; install a resolving stub for copy flows. */
+function stubClipboard(): void {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: vi.fn(() => Promise.resolve()) },
+  })
+}
+
+let loadOlder = vi.fn(() => Promise.resolve())
+let sessionState = { hasMore: false, loadingOlder: false }
 
 const toolRunningClass = css.toolRunning
 if (toolRunningClass === undefined) throw new Error('toolRunning class missing from GraphView.module.css')
@@ -95,6 +116,7 @@ async function bench() {
   // plugin's fiber and disappear with it, exactly as in the client roster.
   const uiConversation = new UiConversation(ctx, { binding: () => undefined } as unknown as ISessions)
   const { events, views } = uiConversation
+  ctx.provide('sessions', { binding: () => undefined } as never)
   slots.register({
     name: 'root',
     children: { 'conversation.view': { kind: 'list', scope: 'session' } },
@@ -166,12 +188,21 @@ describe('GraphView', () => {
       : template.replaceAll(/\{\{(\w+)\}\}/g, (_match, name: string) => String(params[name] ?? ''))
   }
 
-  function renderGraph(snapshot: GraphSnapshot) {
+  const enT = (key: string, params?: Record<string, unknown>) => {
+    const template = en[key as keyof typeof en] ?? key
+    return params === undefined
+      ? template
+      : template.replaceAll(/\{\{(\w+)\}\}/g, (_match, name: string) => String(params[name] ?? ''))
+  }
+
+  function renderGraph(snapshot: GraphSnapshot, translate: typeof t = t) {
     const store = createSnapshotStore(snapshot)
     const props = {
       sessionId: 's1',
       useGraph: bindSnapshotSelector(store),
-      t,
+      useSession: (selector: (snapshot: typeof sessionState) => unknown) => selector(sessionState),
+      loadOlder,
+      t: translate,
     } as unknown as ComponentProps<typeof GraphView>
     return render(<GraphView {...props} />)
   }
@@ -294,6 +325,142 @@ describe('GraphView', () => {
     expect(screen.getAllByText('hello there').length).toBeGreaterThanOrEqual(2)
   })
 
+  it('shows reasoning in the detail panel for a reasoning-only reply', () => {
+    renderGraph({
+      nodes: [
+        {
+          kind: 'assistant-message', seq: 1, time: 1, turn: 1, step: 1, callIds: [], textPreview: '',
+          reasoning: 'internal thought',
+        },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /模型回复/ }))
+    expect(screen.getByText('思考过程')).toBeTruthy()
+    expect(screen.getByText('internal thought')).toBeTruthy()
+  })
+
+  it('lists the triggered tool names when a reply has no visible text', () => {
+    renderGraph({
+      nodes: [
+        {
+          kind: 'assistant-message', seq: 1, time: 1, turn: 1, step: 1, callIds: ['call-a', 'call-b'],
+          textPreview: '', toolNames: ['read', 'bash'],
+        },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /模型回复/ }))
+    expect(screen.getByText('工具调用')).toBeTruthy()
+    expect(screen.getByText('read')).toBeTruthy()
+    expect(screen.getByText('bash')).toBeTruthy()
+  })
+
+  it('shows a placeholder for a reply with no text, reasoning, or tool calls', () => {
+    renderGraph({
+      nodes: [
+        { kind: 'assistant-message', seq: 1, time: 1, turn: 1, step: 1, callIds: [], textPreview: '' },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /模型回复/ }))
+    expect(screen.getByText('该回复没有可展示的文本')).toBeTruthy()
+  })
+
+  it('allows zooming further out and offers a scroll-to-top control above the zoom buttons', () => {
+    renderGraph({
+      nodes: [
+        { kind: 'tool-call', seq: 1, time: 1, turn: 1, step: 1, callId: 'call-a', name: 'bash', argsRaw: '{}' },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    expect(screen.getByTestId('rf').getAttribute('data-min-zoom')).toBe('0.2')
+
+    setCenterMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: '回到顶部' }))
+    expect(setCenterMock).toHaveBeenCalledTimes(1)
+    expect(setCenterMock).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
+      zoom: 1,
+      duration: 300,
+    })
+  })
+
+  it('renders assistant Markdown with the shared renderer and offers a raw-Markdown copy button', async () => {
+    renderGraph({
+      nodes: [
+        {
+          kind: 'assistant-message', seq: 1, time: 1, turn: 1, step: 1, callIds: [],
+          textPreview: '**bold** and `code`',
+        },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /模型回复/ }))
+    expect(screen.getByText('bold').tagName).toBe('STRONG')
+    expect(screen.getByText('code').tagName).toBe('CODE')
+
+    // Without a clipboard the control stays inert instead of throwing.
+    const copy = screen.getByRole('button', { name: '复制 Markdown' })
+    fireEvent.click(copy)
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    // With a clipboard it confirms through the localized toast.
+    stubClipboard()
+    fireEvent.click(copy)
+    expect((await screen.findByRole('alert')).textContent).toBe('Markdown 内容复制成功')
+  })
+
+  it('localizes the copy toast from the active language', async () => {
+    renderGraph({
+      nodes: [
+        {
+          kind: 'assistant-message', seq: 1, time: 1, turn: 1, step: 1, callIds: [],
+          textPreview: 'hello',
+        },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    }, enT)
+
+    fireEvent.click(screen.getByRole('button', { name: /Assistant message/ }))
+    stubClipboard()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Markdown' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('Markdown copied to clipboard')
+  })
+
+  it('scrolls to the leftmost top-row node instead of averaging across columns', () => {
+    const snapshot: GraphSnapshot = {
+      nodes: [
+        { kind: 'tool-call', seq: 1, time: 1, turn: 1, step: 1, callId: 'call-a', name: 'bash', argsRaw: '{}' },
+        { kind: 'tool-call', seq: 2, time: 2, turn: 1, step: 1, callId: 'call-b', name: 'grep', argsRaw: '{}' },
+      ],
+      edges: [],
+      runningCallIds: new Set(),
+    }
+    renderGraph(snapshot)
+
+    const first = layoutGraphSnapshot(snapshot).nodes.reduce((best, entry) =>
+      entry.y < best.y || (entry.y === best.y && entry.x < best.x) ? entry : best)
+
+    setCenterMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: '回到顶部' }))
+    expect(setCenterMock).toHaveBeenCalledWith(
+      first.x + first.width / 2,
+      first.y + first.height / 2,
+      { zoom: 1, duration: 300 },
+    )
+  })
+
   it('renders a request-header node and a sequence edge to the next node in its turn', () => {
     const { container } = renderGraph({
       nodes: [
@@ -397,7 +564,13 @@ describe('GraphView', () => {
 
   it('falls back to the empty snapshot when the session has not registered a graph view', () => {
     const store = createSnapshotStore<GraphSnapshot | undefined>(undefined)
-    const props = { sessionId: 's1', useGraph: bindSnapshotSelector(store), t } as unknown as ComponentProps<typeof GraphView>
+    const props = {
+      sessionId: 's1',
+      useGraph: bindSnapshotSelector(store),
+      useSession: (selector: (snapshot: typeof sessionState) => unknown) => selector(sessionState),
+      loadOlder,
+      t,
+    } as unknown as ComponentProps<typeof GraphView>
     render(<GraphView {...props} />)
 
     expect(screen.getByText('当前会话暂无活动')).toBeTruthy()
@@ -481,14 +654,85 @@ describe('GraphView', () => {
     fireEvent.click(trigger)
     const items = screen.getAllByRole('menuitem')
     expect(items.map(item => item.textContent)).toEqual([
-      `第 1 轮 · ${'x'.repeat(40)}…`,
       '第 2 轮',
+      `第 1 轮 · ${'x'.repeat(40)}…`,
     ])
 
     // Pick turn 1: turn 2's tool call disappears, turn 1's request header appears.
     fireEvent.click(screen.getByRole('menuitem', { name: /第 1 轮/ }))
     expect(screen.queryByText('grep')).toBeNull()
     expect(screen.getByText('请求')).toBeTruthy()
+  })
+
+  it('offers to load older session history when the loaded window holds fewer turns', () => {
+    sessionState = { hasMore: true, loadingOlder: false }
+    loadOlder = vi.fn(() => Promise.resolve())
+    renderGraph({
+      nodes: Array.from({ length: 4 }, (_unused, index) => ({
+        kind: 'turn-group' as const,
+        turn: 22 + index,
+      })),
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '选择轮次' }))
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
+      '第 25 轮',
+      '第 24 轮',
+      '第 23 轮',
+      '第 22 轮',
+      '加载更早轮次',
+    ])
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '加载更早轮次' }))
+    expect(loadOlder).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the older-history row while a page is loading', () => {
+    sessionState = { hasMore: true, loadingOlder: true }
+    renderGraph({
+      nodes: [{ kind: 'turn-group', turn: 1 }],
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '选择轮次' }))
+    const row = screen.getByRole('menuitem', { name: /正在加载更早轮次/ })
+    expect((row as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(row)
+    expect(loadOlder).not.toHaveBeenCalled()
+  })
+
+  it('shows at most ten turns per page and loads ten more from the pinned footer', () => {
+    renderGraph({
+      nodes: Array.from({ length: 25 }, (_unused, index) => ({
+        kind: 'turn-group' as const,
+        turn: index + 1,
+      })),
+      edges: [],
+      runningCallIds: new Set(),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '选择轮次' }))
+
+    // Newest first: the selected last turn opens the list, ten rows per page.
+    const pageOne = screen.getAllByRole('menuitem').map(item => item.textContent)
+    expect(pageOne).toHaveLength(11) // ten turns + the load-more row
+    expect(pageOne[0]).toBe('第 25 轮')
+    expect(pageOne[9]).toBe('第 16 轮')
+    expect(pageOne[10]).toBe('加载更多（还剩 15 轮）')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /加载更多/ }))
+    const pageTwo = screen.getAllByRole('menuitem').map(item => item.textContent)
+    expect(pageTwo).toHaveLength(21) // twenty turns + the load-more row
+    expect(pageTwo[19]).toBe('第 6 轮')
+    expect(pageTwo[20]).toBe('加载更多（还剩 5 轮）')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /加载更多/ }))
+    const pageThree = screen.getAllByRole('menuitem').map(item => item.textContent)
+    expect(pageThree).toHaveLength(25) // every turn, footer gone
+    expect(pageThree[24]).toBe('第 1 轮')
   })
 
   it('offers a turn option for a turn represented only by its synthesized turn-group node', () => {

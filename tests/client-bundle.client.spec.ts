@@ -63,7 +63,7 @@ describe('tsdown client artifact', () => {
     const { handoff, exports } = await loadArtifact()
     expect(handoff.id).toBe(PLUGIN_ID)
     expect(exports.apply).toBeTypeOf('function')
-    expect(exports.inject).toEqual(['slots', 'uiConversation', 'locale'])
+    expect(exports.inject).toEqual(['slots', 'sessions', 'uiConversation', 'locale'])
   })
 
   it.skipIf(code === undefined)('mounted as an object plugin, apply registers the view tab on the real ring', async () => {
@@ -73,6 +73,7 @@ describe('tsdown client artifact', () => {
     const slots = ctx.slots as SlotRegistry
     const uiConversation = new UiConversation(ctx, { binding: () => undefined } as unknown as ISessions)
     const { events, views } = uiConversation
+    ctx.provide('sessions', { binding: () => undefined } as never)
     // The conversation entry's role: the ring must be declared before riders land.
     slots.register({
       name: 'root',

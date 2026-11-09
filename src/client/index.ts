@@ -3,6 +3,7 @@
  * without defining a service.
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -20,7 +21,7 @@ import { installGraphStyles } from './graph-styles.ts'
 import { en, NS, zh } from './locales.ts'
 
 /** Required services: the conversation slot, the target registries, and the locale service. */
-export const inject = ['slots', 'uiConversation', 'locale']
+export const inject = ['slots', 'sessions', 'uiConversation', 'locale']
 
 /** Snapshot hook name; `InjectFace` turns it into the component's `useGraph` prop. */
 const HOOK = 'graph'
@@ -49,6 +50,10 @@ export function apply(ctx: Context): void {
     locale: NS,
     label: () => t('view.graph'),
     inject: (sessionId: SessionId): GraphViewInjected => {
+      const session = (ctx.sessions as ISessions).binding(sessionId)?.session
+      if (session === undefined) {
+        throw new Error(`dsh-plugin-execution-graph: session "${sessionId}" is unavailable`)
+      }
       const target = ctx.uiConversation.binding(sessionId).target(HOOK)
       let source = sources.get(sessionId)
       if (source === undefined) {
@@ -58,7 +63,10 @@ export function apply(ctx: Context): void {
         }
         sources.set(sessionId, source)
       }
-      return { hooks: { [HOOK]: source } }
+      return {
+        hooks: { [HOOK]: source },
+        loadOlder: async () => { await session.loadOlder() },
+      }
     },
   }, GraphView))
 }

@@ -156,20 +156,6 @@ export function GraphNodeCard({ data }: NodeProps) {
   )
 }
 
-/**
- * A merge junction: a small dot where several column-tail connectors converge
- * before bending into the next column's opening node. Carries top target and
- * bottom source Handles so the merge edges attach at its center.
- */
-export function GraphJunctionNode() {
-  return (
-    <div className={css.junction}>
-      <Handle type="target" position={Position.Top} className={css.junctionHandle} isConnectable={false} />
-      <Handle type="source" position={Position.Bottom} className={css.junctionHandle} isConnectable={false} />
-    </div>
-  )
-}
-
 /** Payload for a fold capsule that replaces a collapsed assistant segment. */
 export interface GraphFoldCapsuleData {
   /** Number of follower nodes hidden inside the segment. */
@@ -205,20 +191,18 @@ export function GraphFoldCapsuleNode({ data }: NodeProps) {
         onExpand()
       }}
     >
-      <Handle type="target" position={Position.Top} className={css.junctionHandle} isConnectable={false} />
+      <Handle type="target" position={Position.Top} className={css.capsuleHandle} isConnectable={false} />
       <span className={css.foldCapsuleLabel}>{t('fold.collapsedCount', { count })}</span>
       <span className={css.foldCapsuleIcon} aria-hidden="true">+</span>
-      <Handle type="source" position={Position.Bottom} className={css.junctionHandle} isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} className={css.capsuleHandle} isConnectable={false} />
     </button>
   )
 }
 
-/** React Flow node-type registry: the shared card, merge-junction dot, and fold capsule. */
+/** React Flow node-type registry: the shared card and the fold capsule. */
 export const GRAPH_NODE_TYPE = 'graph'
-export const GRAPH_JUNCTION_TYPE = 'graph-junction'
 export const GRAPH_FOLD_TYPE = 'graph-fold'
 export const graphNodeTypes = {
   [GRAPH_NODE_TYPE]: GraphNodeCard,
-  [GRAPH_JUNCTION_TYPE]: GraphJunctionNode,
   [GRAPH_FOLD_TYPE]: GraphFoldCapsuleNode,
 }

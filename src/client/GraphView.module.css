@@ -2,8 +2,19 @@
 .root {
   display: flex;
   flex-direction: column;
+  /* `clip` (not `hidden`) keeps this box from becoming a scroll container, so
+     the toolbar's sticky offset resolves against the host's session scroller
+     (`.scrollBody`) instead of this element. `hidden` remains the fallback. */
   overflow: hidden;
-  height: 100%;
+  overflow: clip;
+  /* The host publishes the scrollport size on `.scrollBody`. Binding to it keeps
+     the view exactly one viewport tall: without it the view's height is content
+     driven, so opening the detail sidebar with long content grows the flex row,
+     pushes the canvas (and its controls) below the fold, and turns the whole
+     session body into a scroller. Subtracting the docked composer keeps that
+     seat's height out of the canvas. */
+  height: calc(var(--dsh-conversation-viewport-height, 100%) - var(--dsh-composer-height, 0px));
+  max-height: calc(var(--dsh-conversation-viewport-height, 100%) - var(--dsh-composer-height, 0px));
   min-height: 0;
   width: 100%;
   box-sizing: border-box;
@@ -19,13 +30,19 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Stays pinned to the top of the host session scrollport while the graph
+   scrolls; the opaque surface keeps canvas dots from showing through. */
 .toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
 }
 
 /* Column-layout toggle (single column vs. default multi-column). */
@@ -81,6 +98,12 @@
   text-align: left;
 }
 
+/* Turn menu: keep roughly ten turn rows visible; the pinned footer loads more.
+   Doubling the module class beats `.scrollable`'s single-class max-height. */
+.turnMenuList.turnMenuList {
+  max-height: 390px;
+}
+
 .turnSelectChevron {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
@@ -98,6 +121,7 @@
   flex: 1;
   min-width: 0;
   position: relative;
+  overflow: hidden;
 }
 
 /* Save-as-PNG affordance pinned to the canvas's bottom-left corner. */
@@ -322,17 +346,12 @@
   opacity: 0.6;
 }
 
-/* Merge junction: a small dot where column-tail connectors converge. */
-.junction {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--dsw-alias-border-l2);
-  border: 2px solid var(--dsw-alias-bg-base);
-  box-sizing: border-box;
+/* Put the scroll-to-top control above React Flow's default zoom-in button. */
+.flowControls button:last-child {
+  order: -1;
 }
 
-.junctionHandle {
+.capsuleHandle {
   width: 1px;
   height: 1px;
   min-width: 1px;
@@ -415,10 +434,60 @@
   padding-right: 28px;
 }
 
+/* Title row plus the top-right raw-Markdown copy control. */
+.detailHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  /* Keep the row clear of the top-right close button. */
+  padding-right: 28px;
+}
+
+.detailHeader .detailTitle {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  padding-right: 0;
+}
+
+.detailCopy {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.detailCopy:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Rendered Markdown body: keep wide tables/code blocks inside the sidebar. */
+.detailMarkdown {
+  overflow-x: auto;
+  font-size: 13px;
+}
+
 .detailMeta {
   color: var(--dsw-alias-label-quaternary);
   font-size: 11px;
   margin-bottom: 6px;
+}
+
+.detailToolName {
+  font-family: var(--dsw-font-family-mono);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  padding: 2px 0;
 }
 
 .detailPre {

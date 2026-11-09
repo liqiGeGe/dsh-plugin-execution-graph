@@ -149,47 +149,9 @@ function edgeColor(kind: 'sequence' | 'triggers' | 'resolves'): string {
   }
 }
 
-/** Off-handle lead length before a step edge turns, matching React Flow's default. */
-const STEP_OFFSET = 20
-
-/**
- * Orthogonal point list for a step edge between a source's bottom handle and a
- * target's top handle, mirroring React Flow's routing: the line leads downward
- * out of the source and arrives downward into the target's top. When the target
- * sits below the source it is a simple Z through the mid-Y; when the target sits
- * above (a merge junction feeding the next column's top row), it detours down
- * out of the source, across a vertical corridor at the mid-X, then up and into
- * the target — the shape shown on screen.
- *
- * @param sx - Source bottom-handle x.
- * @param sy - Source bottom-handle y.
- * @param tx - Target top-handle x.
- * @param ty - Target top-handle y.
- * @returns Ordered `[x, y]` points from source to target.
- */
-export function stepEdgePoints(
-  sx: number, sy: number, tx: number, ty: number,
-): readonly (readonly [number, number])[] {
-  if (ty >= sy) {
-    const midY = (sy + ty) / 2
-    return [[sx, sy], [sx, midY], [tx, midY], [tx, ty]]
-  }
-  const midX = (sx + tx) / 2
-  const lead = sy + STEP_OFFSET
-  const tail = ty - STEP_OFFSET
-  return [
-    [sx, sy],
-    [sx, lead],
-    [midX, lead],
-    [midX, tail],
-    [tx, tail],
-    [tx, ty],
-  ]
-}
-
 /**
  * Draw a full execution-graph layout onto a 2D canvas context, filling the
- * background and rendering every edge, junction, and node at absolute layout
+ * background and rendering every edge and node at absolute layout
  * coordinates. The caller sizes/scales the canvas; this routine assumes the
  * context is already translated so content at layout origin lands at
  * {@link EXPORT_PADDING}.
@@ -205,21 +167,13 @@ export function drawGraphLayout(
   running: ReadonlySet<string>,
   t: GraphTranslate,
 ): void {
-  // Exit point of an edge's source: bottom-center of a node, or the junction center.
+  // Exit point of an edge's source: bottom-center of its node card.
   const exitOf = (id: string): { x: number; y: number } | null => {
-    if (id.startsWith('junction:')) {
-      const junction = layout.junctions.find(entry => entry.id === id)
-      return junction === undefined ? null : { x: junction.x, y: junction.y }
-    }
     const node = layout.nodes.find(entry => entry.id === id)
     return node === undefined ? null : { x: node.x + node.width / 2, y: node.y + node.height }
   }
-  // Entry point of an edge's target: top-center of a node, or the junction center.
+  // Entry point of an edge's target: top-center of its node card.
   const entryOf = (id: string): { x: number; y: number } | null => {
-    if (id.startsWith('junction:')) {
-      const junction = layout.junctions.find(entry => entry.id === id)
-      return junction === undefined ? null : { x: junction.x, y: junction.y }
-    }
     const node = layout.nodes.find(entry => entry.id === id)
     return node === undefined ? null : { x: node.x + node.width / 2, y: node.y }
   }
@@ -233,28 +187,11 @@ export function drawGraphLayout(
     ctx.strokeStyle = color
     ctx.lineWidth = 1.5
     ctx.beginPath()
-    if (positioned.orthogonal === true) {
-      const points = stepEdgePoints(from.x, from.y, to.x, to.y)
-      const [firstX, firstY] = points[0] as readonly [number, number]
-      ctx.moveTo(firstX, firstY)
-      for (const [px, py] of points.slice(1)) ctx.lineTo(px, py)
-    } else {
-      ctx.moveTo(from.x, from.y)
-      ctx.lineTo(to.x, to.y)
-    }
+    ctx.moveTo(from.x, from.y)
+    ctx.lineTo(to.x, to.y)
     ctx.stroke()
     // Arrowhead at the target entry, matching the on-screen closed marker.
-    // Junction targets carry no arrowhead (they are merge dots, not endpoints).
-    if (!positioned.target.startsWith('junction:')) {
-      drawArrowhead(ctx, to.x, to.y, color)
-    }
-  }
-
-  for (const junction of layout.junctions) {
-    ctx.fillStyle = '#c9ccd1'
-    ctx.beginPath()
-    ctx.arc(junction.x, junction.y, 5, 0, Math.PI * 2)
-    ctx.fill()
+    drawArrowhead(ctx, to.x, to.y, color)
   }
 
   for (const positioned of layout.nodes) {

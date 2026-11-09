@@ -162,10 +162,11 @@ describe('Graph conversation Definitions', () => {
       step: 1,
       callIds: ['call-a', 'call-b'],
       textPreview: 'first line\nsecond line',
+      toolNames: ['read', 'bash'],
     })
   })
 
-  it('ignores assistant message blocks that are neither text nor tool-call', () => {
+  it('captures reasoning text separately from the visible reply', () => {
     const current = snapshot(assembler([
       at(1, 'turn/start', { turn: 1 }),
       at(2, 'step/start', { turn: 1, step: 1 }),
@@ -187,6 +188,33 @@ describe('Graph conversation Definitions', () => {
       step: 1,
       callIds: [],
       textPreview: 'visible line',
+      reasoning: 'internal thought',
+    })
+  })
+
+  it('keeps the visible text empty for a tool-only reply while recording its tool names', () => {
+    const current = snapshot(assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', {
+        turn: 1,
+        step: 1,
+        message: assistantMessage('assistant-1', [
+          { type: 'tool-call', id: 'call-a', name: 'read', arguments: '{}' },
+          { type: 'tool-call', id: 'call-b', name: 'bash', arguments: '{}' },
+        ]),
+      }),
+    ]))
+
+    expect(current.nodes).toContainEqual({
+      kind: 'assistant-message',
+      seq: 3,
+      time: 1_700_000_000_003,
+      turn: 1,
+      step: 1,
+      callIds: ['call-a', 'call-b'],
+      textPreview: '',
+      toolNames: ['read', 'bash'],
     })
   })
 

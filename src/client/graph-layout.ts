@@ -20,8 +20,6 @@ const ROW_GAP = 56;
 const COLUMN_GAP = 72;
 /** Horizontal gap between parallel sibling nodes sharing one timeline step. */
 const SIBLING_GAP = 32;
-/** Radius of a merge-junction dot, used only to size the canvas around it. */
-const JUNCTION_RADIUS = 7;
 
 /**
  * One positioned business node ready for React Flow placement. `x`/`y` are the
@@ -46,30 +44,12 @@ export interface PositionedGraphEdge {
   readonly source: string;
   /** Target node element id, matching a {@link PositionedGraphNode.id}. */
   readonly target: string;
-  /** Draw as a right-angle (step) connector rather than the default curve (merge-junction edges). */
-  readonly orthogonal?: boolean;
-}
-
-/**
- * A synthesized merge point: when a column's last row holds several nodes that
- * all feed one node at the start of the next column, their connectors converge
- * on this small junction, which then bends into that next-column node. Purely a
- * layout artifact — it carries no business data and is drawn as a small dot.
- */
-export interface GraphJunction {
-  /** Junction element id (`junction:<targetId>`), usable as an edge endpoint. */
-  readonly id: string;
-  /** Center x of the dot. */
-  readonly x: number;
-  /** Center y of the dot. */
-  readonly y: number;
 }
 
 /** Laid-out graph ready for React Flow, plus the canvas size it occupies. */
 export interface GraphLayout {
   readonly nodes: readonly PositionedGraphNode[];
   readonly edges: readonly PositionedGraphEdge[];
-  readonly junctions: readonly GraphJunction[];
   readonly width: number;
   readonly height: number;
 }
@@ -77,7 +57,6 @@ export interface GraphLayout {
 const EMPTY_LAYOUT: GraphLayout = {
   nodes: [],
   edges: [],
-  junctions: [],
   width: 0,
   height: 0,
 };
@@ -156,8 +135,7 @@ function computeRanks(
 export interface GraphLayoutOptions {
   /**
    * Render every timeline step in a single vertical column instead of wrapping
-   * into new column blocks every {@link ROWS_PER_COLUMN} steps. Single-column
-   * layout never produces merge junctions — its code path never constructs them.
+   * into new column blocks every {@link ROWS_PER_COLUMN} steps.
    */
   readonly singleColumn?: boolean;
 }
@@ -177,7 +155,7 @@ function rowWidth(members: readonly GraphCardNode[]): number {
  * @param rows - Rank → parallel siblings bucket.
  * @param columnOf - Rank → column block index.
  * @param rowOf - Rank → row index within its block.
- * @returns Positioned nodes and the bounding max x/y before junction extent.
+ * @returns Positioned nodes and the bounding max x/y.
  */
 function placeTimeline(
   rows: ReadonlyMap<number, readonly GraphCardNode[]>,
@@ -246,87 +224,6 @@ function causalEdgesOf(
 }
 
 /**
- * Build the merge junctions and the edge rerouting they require, for the
- * multi-column layout only. When a column's last row holds several parallel
- * nodes that all feed the next column's opening node, their connectors converge
- * on one junction dot, which then bends into that next-column node.
- *
- * @param positioned - Placed nodes (for coordinates and rank lookup).
- * @param rank - Rank per node element id.
- * @param causal - Drawable edges to reroute across column boundaries.
- * @returns The junctions and every edge (rerouted `orthogonal` ones plus the
- * unrerouted causal edges).
- */
-function buildMergeJunctions(
-  positioned: readonly PositionedGraphNode[],
-  rank: ReadonlyMap<string, number>,
-  causal: readonly Exclude<GraphEdge, GraphContainsEdge>[],
-): { edges: PositionedGraphEdge[]; junctions: GraphJunction[] } {
-  const positionById = new Map(positioned.map((entry) => [entry.id, entry]));
-  const nodesByRank = new Map<number, string[]>();
-  for (const entry of positioned) {
-    pushToBucket(nodesByRank, rank.get(entry.id) as number, entry.id);
-  }
-
-  const junctions: GraphJunction[] = [];
-  const reroutedEdgeKeys = new Set<string>();
-  const edges: PositionedGraphEdge[] = [];
-
-  for (const [tailRank, tailIds] of nodesByRank) {
-    if (tailRank % ROWS_PER_COLUMN !== ROWS_PER_COLUMN - 1 || tailIds.length < 2) continue;
-    const crossing = causal.filter((edge) => {
-      const source = endpointElementId(edge.from);
-      const target = endpointElementId(edge.to);
-      return tailIds.includes(source) && rank.get(target) === tailRank + 1;
-    });
-    const feedingSources = new Set(crossing.map((edge) => endpointElementId(edge.from)));
-    if (feedingSources.size < 2) continue;
-
-    const sourceNodes = [...feedingSources].map(
-      (id) => positionById.get(id) as PositionedGraphNode,
-    );
-    const sourceBottom = Math.max(
-      ...sourceNodes.map((entry) => entry.y + entry.height),
-    );
-    const junctionX =
-      sourceNodes.reduce((sum, entry) => sum + entry.x + entry.width / 2, 0) /
-      sourceNodes.length;
-    const junctionId = `junction:col${tailRank}`;
-    junctions.push({ id: junctionId, x: junctionX, y: sourceBottom + ROW_GAP });
-
-    for (const source of feedingSources) {
-      const anyEdge = crossing.find((edge) => endpointElementId(edge.from) === source);
-      edges.push({
-        edge: anyEdge as Exclude<GraphEdge, GraphContainsEdge>,
-        source,
-        target: junctionId,
-        orthogonal: true,
-      });
-    }
-    for (const edge of crossing) {
-      reroutedEdgeKeys.add(
-        `${endpointElementId(edge.from)}->${endpointElementId(edge.to)}`,
-      );
-      edges.push({
-        edge,
-        source: junctionId,
-        target: endpointElementId(edge.to),
-        orthogonal: true,
-      });
-    }
-  }
-
-  for (const edge of causal) {
-    const source = endpointElementId(edge.from);
-    const target = endpointElementId(edge.to);
-    if (reroutedEdgeKeys.has(`${source}->${target}`)) continue;
-    edges.push({ edge, source, target });
-  }
-
-  return { edges, junctions };
-}
-
-/**
  * Position one session-turn's activity as a vertical timeline for React Flow.
  * Turn-group nodes are dropped: only one turn is shown at a time, so its
  * container box would be redundant chrome. Every other node is ranked by
@@ -334,11 +231,11 @@ function buildMergeJunctions(
  * parallel siblings spread horizontally, and after {@link ROWS_PER_COLUMN}
  * steps the timeline wraps into the next column block to the right.
  *
- * When {@link GraphLayoutOptions.singleColumn} is set, the layout takes a
- * distinct code path that keeps every rank in one vertical column and never
- * calls {@link buildMergeJunctions}, so the result has `junctions: []` and no
- * `orthogonal` edges by construction. `x`/`y` are top-left corners; edges carry
- * React Flow source/target ids.
+ * When {@link GraphLayoutOptions.singleColumn} is set, every rank stays in one
+ * vertical column; otherwise the timeline wraps after
+ * {@link ROWS_PER_COLUMN} steps and cross-column connectors keep React Flow's
+ * default edge shape (no right-angle rerouting). `x`/`y` are top-left corners;
+ * edges carry React Flow source/target ids.
  *
  * @param snapshot - Graph snapshot to lay out (already narrowed to one turn).
  * @param options - Optional column-layout control.
@@ -365,27 +262,11 @@ export function layoutGraphSnapshot(
     singleColumn ? (nodeRank) => nodeRank : (nodeRank) => nodeRank % ROWS_PER_COLUMN,
   );
   const causal = causalEdgesOf(snapshot, positioned);
+  const edges: PositionedGraphEdge[] = causal.map((edge) => ({
+    edge,
+    source: endpointElementId(edge.from),
+    target: endpointElementId(edge.to),
+  }));
 
-  // Single-column: straight edges only, no junction construction at all.
-  if (singleColumn) {
-    const edges: PositionedGraphEdge[] = causal.map((edge) => ({
-      edge,
-      source: endpointElementId(edge.from),
-      target: endpointElementId(edge.to),
-    }));
-    return { nodes: positioned, edges, junctions: [], width: maxX, height: maxY };
-  }
-
-  const { edges, junctions } = buildMergeJunctions(positioned, rank, causal);
-
-  // Junctions sit below their column-tail row, so extend the canvas extent to
-  // include them; otherwise the PNG export (sized from width/height) clips them.
-  let extentX = maxX;
-  let extentY = maxY;
-  for (const junction of junctions) {
-    extentX = Math.max(extentX, junction.x + JUNCTION_RADIUS);
-    extentY = Math.max(extentY, junction.y + JUNCTION_RADIUS);
-  }
-
-  return { nodes: positioned, edges, junctions, width: extentX, height: extentY };
+  return { nodes: positioned, edges, width: maxX, height: maxY };
 }

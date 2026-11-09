@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-A DeepSeek Harness (DSH) client plugin that adds an **"Execution graph"** tab to the conversation view. It reconstructs one session turn's activity as a vertical timeline on a [React Flow](https://reactflow.dev) canvas: the turn's `request-header`, `assistant-message`, `tool-call`, and `tool-result` nodes are ranked into timeline steps stacked top-to-bottom and connected by arrowed edges from each step to the next. `turn-group` container nodes are not drawn — one turn is shown at a time (defaulting to the session's last), so a container box would be redundant. Tool calls are never merged by name — each call and its result are independent nodes tied by a `resolves` edge, an assistant message's tool-call blocks connect to their `tool-call` nodes by a `triggers` edge, and same-group nodes chain by a `sequence` edge in event order. Parallel tool calls triggered by one assistant message share a timeline step and spread horizontally; a column is capped at ten steps and then wraps into the next column block to the right, and when a column's last row holds several parallel nodes feeding the next column, their connectors converge through a merge junction before bending into the next column. A running tool call (present in the shared Session window's running-call-id set, with no settled result yet) renders with a distinct dashed, pulsing border instead of a fabricated result. A `tool-call` card puts its `Tool` kind label and tool name on one row and a truncated argument preview on the next. Selecting a node fills a persistent detail sidebar to the right — resizable (320–600px, collapsible) — that shows a `Payload` JSON tree for tool calls and a line-broken command block for shell commands. A turn selector above the canvas lists every turn and defaults to the last; switching turns re-centers the canvas at scale 1. A download button in the canvas's lower-left corner exports the whole graph as a PNG. Each `assistant-message` card carries a fold toggle on its right edge: collapsing hides the tool calls/results that follow it up to the next assistant message (an in-place view transform — columns and coordinates stay fixed), leaving a fold capsule that bridges the collapsed reply to the next one and can be clicked to expand. The package provides no service and declares no Context merge; it registers target-specific Conversation Event Definitions, a Graph view snapshot builder, and one tab in the conversation's `'conversation.view'` slot ring.
+A DeepSeek Harness (DSH) client plugin that adds an **"Execution graph"** tab to the conversation view. It reconstructs one session turn's activity as a vertical timeline on a [React Flow](https://reactflow.dev) canvas: the turn's `request-header`, `assistant-message`, `tool-call`, and `tool-result` nodes are ranked into timeline steps stacked top-to-bottom and connected by arrowed edges from each step to the next. `turn-group` container nodes are not drawn — one turn is shown at a time (defaulting to the session's last), so a container box would be redundant. Tool calls are never merged by name — each call and its result are independent nodes tied by a `resolves` edge, an assistant message's tool-call blocks connect to their `tool-call` nodes by a `triggers` edge, and same-group nodes chain by a `sequence` edge in event order. Parallel tool calls triggered by one assistant message share a timeline step and spread horizontally; a column is capped at ten steps and then wraps into the next column block to the right, and the cross-column connectors keep React Flow's default curved edge shape — there is no right-angle rerouting. A running tool call (present in the shared Session window's running-call-id set, with no settled result yet) renders with a distinct dashed, pulsing border instead of a fabricated result. A `tool-call` card puts its `Tool` kind label and tool name on one row and a truncated argument preview on the next. Selecting a node fills a persistent detail sidebar to the right — resizable (320–600px, collapsible) — that shows a `Payload` JSON tree for tool calls, a line-broken command block for shell commands, and — for assistant replies — the visible text, reasoning stream, and the tool names the reply triggered. Markdown-bearing text renders through the same shared Markdown renderer the Trajectory preview uses, and a copy button in the detail header copies the node's raw Markdown source, confirming with a localized toast. A turn selector above the canvas lists turns newest first, ten per page — a pinned row loads ten more, and once the loaded window is exhausted a "Load earlier turns" row fetches one older history page from the session — and defaults to the last; switching turns re-centers the canvas at scale 1. A download button in the canvas's lower-left corner exports the whole graph as a PNG. The canvas zooms out to a scale of 0.2, and a scroll-to-top control above React Flow's zoom buttons recenters the viewport on the turn's first node. Each `assistant-message` card carries a fold toggle on its right edge: collapsing hides the tool calls/results that follow it up to the next assistant message (an in-place view transform — columns and coordinates stay fixed), leaving a fold capsule that bridges the collapsed reply to the next one and can be clicked to expand. The package provides no service and declares no Context merge; it registers target-specific Conversation Event Definitions, a Graph view snapshot builder, and one tab in the conversation's `'conversation.view'` slot ring.
 
 ## Compatibility
 
@@ -13,11 +13,20 @@ line.
 
 | DSH runtime | Plugin version | Status |
 | --- | --- | --- |
-| `0.2.x` (client peers `^0.2.2-rc.1`) | `0.2.x` — tag `v0.2.0` | current |
+| `0.2.x` (client peers `^0.2.2-rc.1`) | `0.2.x` — tags `>= v0.2.0` | current |
 | `0.1.x` (client peers `^0.1.1-rc.2`) | `0.1.x` — tag `v0.1.4` | maintenance only |
 
 A bare `dsh-plugin-execution-graph` install resolves to the registry's `latest`
 tag, so pin the version explicitly (see [Installation](#installation)).
+
+## What's changed in 0.2.x
+
+- **Turn picker paging and history** — turns list newest first, ten rows per page with a pinned "load more" row, and a "load earlier turns" row pulls one older session-history page when the loaded window runs out.
+- **Markdown detail** — assistant replies, user prompts, and request prompts render through the same shared `MarkdownText` renderer the Trajectory preview uses; the detail header copies the raw Markdown and confirms with a localized toast.
+- **Complete assistant detail** — the reasoning stream and the triggered tool names are shown, with a placeholder when a reply has no text, reasoning, or calls.
+- **Default cross-column edges** — the right-angle merge-junction routing was removed; wrapped columns connect with React Flow's default curves.
+- **Canvas controls** — the minimum zoom is `0.2`, and the scroll-to-top control targets the top-left node even when wrapped columns share the same row.
+- **Stable chrome** — the toolbar is sticky, and the view is bound to the session viewport height so opening a long detail keeps the canvas controls visible while the sidebar scrolls internally.
 
 ## Plugin results
 
@@ -44,7 +53,7 @@ Because every contribution goes through `ctx.effect` / `ctx.on` and `slots.regis
 
 ## Service dependencies and injection
 
-`inject = ['slots', 'uiConversation', 'locale']`.
+`inject = ['slots', 'sessions', 'uiConversation', 'locale']`.
 
 These are the services the plugin requires at load time; each is provided by the base DSH client stack (`@deepseek-ai/dsh-base` and the web surface) and declared via the package's `dsh.client.inject` manifest. The plugin declares no optional dependencies and performs no `ctx.get()` of optional services. Because it declares its injections, Cordis disposes the plugin automatically if one of these services is unloaded and re-mounts it when the service returns — the plugin does not need to observe dependency loss itself.
 
@@ -58,11 +67,11 @@ Install into a profile with `dsh plugin`, which reads the package's `dsh.bundle`
 
 ```sh
 # match the line to your DSH runtime (see Compatibility)
-dsh plugin --profile <name> add dsh-plugin-execution-graph@0.2.0
+dsh plugin --profile <name> add dsh-plugin-execution-graph@^0.2.0
 ```
 
-If the registry has not published `0.2.0` yet, install it from the GitHub tag
-instead:
+If the registry has not caught up with the current `0.2.x` release yet, install
+the matching GitHub tag instead (swap `v0.2.0` for the newer `v0.2.x` tag you need):
 
 ```sh
 dsh plugin --profile <name> add github:liqiGeGe/dsh-plugin-execution-graph#v0.2.0
@@ -110,12 +119,12 @@ Only an assistant message that actually has following tool nodes is foldable —
 
 A turn whose timeline runs longer than the column cap (ten steps) wraps into a second column block to the right. Two buttons next to the turn selector switch this:
 
-- **Single column** (`layout.singleColumn`) — every timeline step renders in one vertical column; row spacing and parallel-sibling spread are unchanged, and the merge junctions that route cross-column edges are dropped because nothing wraps.
-- **Restore default** (`layout.default`) — back to the wrapped multi-column layout with merge junctions.
+- **Single column** (`layout.singleColumn`) — every timeline step renders in one vertical column; row spacing and parallel-sibling spread are unchanged, and no column wraps.
+- **Restore default** (`layout.default`) — back to the wrapped multi-column layout.
 
 Both buttons set a boolean passed to `layoutGraphSnapshot({ singleColumn })`; toggling re-centers the canvas at scale 1.
 
-Single-column layout is a distinct code path, not a flag threaded through the multi-column one: when `singleColumn` is set, `layoutGraphSnapshot` returns straight edges with `junctions: []` and never calls the merge-junction builder, so no right-angle (step) connector can exist in that mode by construction. The multi-column layout synthesizes a merge junction only when a column's last row holds two or more parallel nodes that all feed the next column's opening node; those connectors render as right-angle step lines and the junction itself as a small dot. Toggling to single column rebuilds the React Flow store (a `key` on the provider), guaranteeing the previous mode's edges and junctions are fully discarded.
+Column wrapping changes only node placement: every connector is an ordinary React Flow edge between two node cards, and neither mode synthesizes junctions or right-angle routes. Toggling to single column rebuilds the React Flow store (a `key` on the provider), guaranteeing the previous mode's edges and viewport state are fully discarded.
 
 ## Model Experience
 

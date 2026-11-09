@@ -78,11 +78,17 @@ const graphAssistantMessageDefinition: ConversationNodeDefinition<GraphAssistant
     }
     const { message } = match.event.data
     const callIds: string[] = []
+    const toolNames: string[] = []
     const textLines: string[] = []
+    const reasoningLines: string[] = []
     for (const block of message.content) {
-      if (block.type === 'tool-call') callIds.push(String(block.id))
-      else if (block.type === 'text') textLines.push(block.text)
+      if (block.type === 'tool-call') {
+        callIds.push(String(block.id))
+        toolNames.push(block.name)
+      } else if (block.type === 'text') textLines.push(block.text)
+      else if (block.type === 'reasoning') reasoningLines.push(block.text)
     }
+    const reasoning = reasoningLines.join('\n')
     return {
       kind: 'assistant-message',
       seq: match.event.seq,
@@ -91,6 +97,8 @@ const graphAssistantMessageDefinition: ConversationNodeDefinition<GraphAssistant
       step: match.event.data.step,
       callIds,
       textPreview: textLines.join('\n'),
+      ...(reasoning === '' ? {} : { reasoning }),
+      ...(toolNames.length === 0 ? {} : { toolNames }),
     }
   },
   update: context => context.state,

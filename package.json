@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-execution-graph",
   "description": "DeepSeek Harness plugin: adds an \"Execution graph\" tab to the conversation view that reconstructs a per-turn directed graph of user prompts, model replies, and tool calls/results from session events, with per-reply folding of tool segments, a resizable payload detail panel, and PNG export. Pure-consumer client plugin: registers one conversation-view slot entry, declares no service, and reverts every side effect on unload.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "Apache-2.0",
   "type": "module",
   "publishConfig": {
@@ -36,6 +36,7 @@
   "dsh": {
     "client": {
       "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation"
       ],
@@ -57,6 +58,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.2.2-rc.1",
@@ -68,6 +70,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-session-controller": "link:../deepseek-harness/packages/api/session-controller",
     "@deepseek-ai/dsh-client-locale": "link:../deepseek-harness/packages/client/locale",
     "@deepseek-ai/dsh-api-session-controller": "link:../deepseek-harness/packages/api/session-controller",
     "@deepseek-ai/dsh-client-store": "link:../deepseek-harness/packages/client/store",
