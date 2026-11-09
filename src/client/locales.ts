@@ -29,7 +29,17 @@ export type GraphKey =
   | "fold.expand"
   | "fold.collapsedCount"
   | "layout.singleColumn"
-  | "layout.default";
+  | "layout.default"
+  | "json.copyValue"
+  | "json.copyJson"
+  | "json.copyPath"
+  | "json.copyPrettyJson"
+  | "json.copyCompactJson"
+  | "json.copied"
+  | "json.copyFailed"
+  | "json.collapseNode"
+  | "json.expandNode"
+  | "json.copyButtonTitle";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {
@@ -65,6 +75,16 @@ export const zh: Record<GraphKey, string> = {
   "fold.collapsedCount": "已收起 {{count}} 个节点",
   "layout.singleColumn": "全部一列",
   "layout.default": "恢复默认",
+  "json.copyValue": "复制值",
+  "json.copyJson": "复制 JSON",
+  "json.copyPath": "复制路径",
+  "json.copyPrettyJson": "复制格式化 JSON",
+  "json.copyCompactJson": "复制紧凑 JSON",
+  "json.copied": "已复制",
+  "json.copyFailed": "复制失败",
+  "json.collapseNode": "折叠",
+  "json.expandNode": "展开",
+  "json.copyButtonTitle": "复制：{{action}}",
 };
 
 /** English dictionary. */
@@ -94,4 +114,14 @@ export const en: Record<GraphKey, string> = {
   "fold.collapsedCount": "{{count}} nodes collapsed",
   "layout.singleColumn": "Single column",
   "layout.default": "Restore default",
+  "json.copyValue": "Copy value",
+  "json.copyJson": "Copy JSON",
+  "json.copyPath": "Copy path",
+  "json.copyPrettyJson": "Copy pretty JSON",
+  "json.copyCompactJson": "Copy compact JSON",
+  "json.copied": "Copied",
+  "json.copyFailed": "Copy failed",
+  "json.collapseNode": "Collapse",
+  "json.expandNode": "Expand",
+  "json.copyButtonTitle": "Copy: {{action}}",
 };

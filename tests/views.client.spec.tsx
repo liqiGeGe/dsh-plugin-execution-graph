@@ -17,12 +17,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps, ComponentType, MouseEvent } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
-import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
+import { stubConfigForm, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import {
-  ConversationEventRegistry, ConversationViewRegistry, createSnapshotStore, SlotRegistry,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConversationSnapshot, ConversationViewSnapshotMap, ConversationViewSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { UiConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import { apply as localeApply, inject as localeInject } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '../src/client/index.ts'
 import { apply as nodeApply } from '../src/index.ts'
@@ -86,22 +86,15 @@ afterEach(cleanup)
 const toolRunningClass = css.toolRunning
 if (toolRunningClass === undefined) throw new Error('toolRunning class missing from GraphView.module.css')
 
-function historySnapshot(graph: GraphSnapshot): ConversationSnapshot {
-  return {
-    sessionId: 's1',
-    views: {
-      get: (<Target extends Extract<keyof ConversationViewSnapshotMap, string>>(target: Target) =>
-        target === 'graph' ? graph : undefined) as ConversationViewSnapshotStore['get'],
-    },
-  } as unknown as ConversationSnapshot
-}
-
 /** Real-stack bench: root Context + real SlotRegistry ring + the plugin fiber. */
 async function bench() {
   const ctx = new Context()
-  const slots = new SlotRegistry(ctx)
-  await ctx.plugin(ConversationEventRegistry).await()
-  await ctx.plugin(ConversationViewRegistry).await()
+  await ctx.plugin(SlotRegistry).await()
+  const slots = ctx.slots as SlotRegistry
+  // Real assembly service so definition registrations are owned by the
+  // plugin's fiber and disappear with it, exactly as in the client roster.
+  const uiConversation = new UiConversation(ctx, { binding: () => undefined } as unknown as ISessions)
+  const { events, views } = uiConversation
   slots.register({
     name: 'root',
     children: { 'conversation.view': { kind: 'list', scope: 'session' } },
@@ -112,10 +105,11 @@ async function bench() {
   ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
   ctx.provide('remote', { $on: () => () => {} } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
-  ctx.plugin({ inject: [...localeInject], apply: localeApply })
+  ctx.provide('configForms', { get: () => stubConfigForm().scope } as never)
+  await ctx.plugin({ inject: [...localeInject], apply: localeApply }).await()
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
-  return { ctx, slots, fiber }
+  return { ctx, slots, fiber, events, views }
 }
 
 function tabsOf(slots: SlotRegistry) {
@@ -124,14 +118,14 @@ function tabsOf(slots: SlotRegistry) {
 }
 
 describe('plugin registration', () => {
-  it('registers graph after chat on the ring, with no inject face', async () => {
+  it('registers graph after chat on the ring with a snapshot inject face', async () => {
     const b = await bench()
     expect(tabsOf(b.slots)).toEqual([
       { id: 'chat', label: 'Chat' },
       { id: 'graph', label: 'Execution graph' },
     ])
     const entry = b.slots.entries('conversation.view').find(candidate => candidate.options.id === 'graph')
-    expect(entry?.inject).toBeUndefined()
+    expect(entry?.inject).toBeTypeOf('function')
   })
 
   it('labels the graph tab in the active locale', async () => {
@@ -147,16 +141,14 @@ describe('plugin registration', () => {
 
   it('fiber disposal removes the tab and leaves chat standing, clearing both registries', async () => {
     const b = await bench()
-    const events = b.ctx.get('conversationEvents') as ConversationEventRegistry
-    const views = b.ctx.get('conversationViews') as ConversationViewRegistry
-    expect(events.entries().length).toBeGreaterThan(0)
-    expect(views.entries()).toHaveLength(1)
+    expect(b.events.entries().length).toBeGreaterThan(0)
+    expect(b.views.entries()).toHaveLength(1)
 
     await b.fiber.dispose()
 
     expect(tabsOf(b.slots).map(v => v.id)).toEqual(['chat'])
-    expect(events.entries()).toEqual([])
-    expect(views.entries()).toEqual([])
+    expect(b.events.entries()).toEqual([])
+    expect(b.views.entries()).toEqual([])
   })
 })
 
@@ -175,10 +167,10 @@ describe('GraphView', () => {
   }
 
   function renderGraph(snapshot: GraphSnapshot) {
-    const store = createSnapshotStore(historySnapshot(snapshot))
+    const store = createSnapshotStore(snapshot)
     const props = {
       sessionId: 's1',
-      useSession: bindSnapshotSelector(store),
+      useGraph: bindSnapshotSelector(store),
       t,
     } as unknown as ComponentProps<typeof GraphView>
     return render(<GraphView {...props} />)
@@ -404,11 +396,8 @@ describe('GraphView', () => {
   })
 
   it('falls back to the empty snapshot when the session has not registered a graph view', () => {
-    const store = createSnapshotStore({
-      sessionId: 's1',
-      views: { get: () => undefined },
-    } as unknown as ConversationSnapshot)
-    const props = { sessionId: 's1', useSession: bindSnapshotSelector(store), t } as unknown as ComponentProps<typeof GraphView>
+    const store = createSnapshotStore<GraphSnapshot | undefined>(undefined)
+    const props = { sessionId: 's1', useGraph: bindSnapshotSelector(store), t } as unknown as ComponentProps<typeof GraphView>
     render(<GraphView {...props} />)
 
     expect(screen.getByText('当前会话暂无活动')).toBeTruthy()

@@ -3,7 +3,7 @@
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { IconChevronDownOutline14, IconChevronUpOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineMedium, IconChevronUpOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GraphCardNode } from './graph-contract.ts'
 import { truncatePreview } from './graph-contract.ts'
 import type { NS } from './locales.ts'
@@ -99,7 +99,7 @@ function CardBody({ node, t, fold }: { node: GraphCardNode; t: GraphTranslate; f
                   fold.onToggle()
                 }}
               >
-                {fold.collapsed ? <IconChevronDownOutline14 /> : <IconChevronUpOutline14 />}
+                {fold.collapsed ? <IconChevronDownOutlineMedium size={14} /> : <IconChevronUpOutlineMedium size={14} />}
               </button>
             )}
           </span>

@@ -14,7 +14,7 @@
  * (two React copies break hook identity).
  */
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import ts from 'typescript'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vitest/config'
@@ -89,21 +89,70 @@ function cssStubPlugin(): Plugin {
  * package's and the framework's — imports one physical React instance.
  */
 function frameworkSourceResolver(): Plugin {
+  // Resolve every @deepseek-ai/* specifier through the monorepo's own
+  // tsconfig.base.json paths facade (the same map its vitest configs use), so
+  // tests run the framework's TypeScript source rather than its built `lib/`
+  // entries — those `./client` artifacts are browser closure-factories that
+  // call window.__ModuleLoader__.load and cannot be imported by Node.
+  const baseConfig = ts.parseConfigFileTextToJson(
+    'tsconfig.base.json',
+    readFileSync(new URL('tsconfig.base.json', `file://${MONOREPO}`), 'utf8'),
+  ).config as { compilerOptions?: { paths?: Record<string, readonly string[]> } } | undefined
+  const paths = baseConfig?.compilerOptions?.paths ?? {}
+  const exact = new Map<string, readonly string[]>()
+  const wildcard: { prefix: string; suffix: string; targets: readonly string[] }[] = []
+  for (const [pattern, targets] of Object.entries(paths)) {
+    const star = pattern.indexOf('*')
+    if (star === -1) exact.set(pattern, targets)
+    else wildcard.push({
+      prefix: pattern.slice(0, star),
+      suffix: pattern.slice(star + 1),
+      targets,
+    })
+  }
+  wildcard.sort((left, right) => right.prefix.length - left.prefix.length)
+
+  const resolveTarget = (target: string): string | null => {
+    const abs = fileURLToPath(new URL(target, `file://${MONOREPO}`))
+    if (existsSync(abs) && !abs.endsWith('/')) {
+      // A directory target maps to its index module.
+      try {
+        if (!statSync(abs).isFile()) {
+          for (const index of ['index.ts', 'index.tsx', 'index.js']) {
+            const candidate = `${abs}/${index}`
+            if (existsSync(candidate)) return candidate
+          }
+          return null
+        }
+      } catch {
+        return null
+      }
+      return abs
+    }
+    for (const index of ['index.ts', 'index.tsx']) {
+      if (existsSync(`${abs}/${index}`)) return `${abs}/${index}`
+    }
+    return null
+  }
+
   const toSrc = (spec: string): string | null => {
     if (!spec.startsWith('@deepseek-ai/')) return null
-    if (spec === '@deepseek-ai/cordis') {
-      return fileURLToPath(new URL('vendor/cordis/src/index.ts', `file://${MONOREPO}`))
+    const direct = exact.get(spec)
+    if (direct !== undefined) {
+      for (const target of direct) {
+        const resolved = resolveTarget(target)
+        if (resolved !== null) return resolved
+      }
     }
-    const rest = spec.slice('@deepseek-ai/'.length)
-    const m = rest.match(/^dsh-client-([a-z0-9-]+)(\/client|\/invariant)?$/)
-    if (m === null) return null
-    const group = rest.startsWith('dsh-client-ui-') ? 'ui-' + m[1] : m[1]
-    const sub = m[2] ?? ''
-    const entry = sub === '' ? 'index.ts' : `${sub.slice(1)}/index.ts`
-    const dir = rest.startsWith('dsh-client-ui-') ? `packages/client/ui-${m[1]}` : `packages/client/${group}`
-    const candidate = `${dir}/src/${entry}`
-    const abs = fileURLToPath(new URL(candidate, `file://${MONOREPO}`))
-    return existsSync(abs) ? abs : null
+    for (const entry of wildcard) {
+      if (!spec.startsWith(entry.prefix) || !spec.endsWith(entry.suffix)) continue
+      const middle = spec.slice(entry.prefix.length, spec.length - entry.suffix.length)
+      for (const target of entry.targets) {
+        const resolved = resolveTarget(target.replace('*', middle))
+        if (resolved !== null) return resolved
+      }
+    }
+    return null
   }
   const toThisReact = (spec: string): string | null => {
     const here = (p: string): string => fileURLToPath(new URL(p, import.meta.url))
@@ -164,6 +213,8 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx'],
     environment: 'node',
-    css: false,
+    // Class names stay equal to their local keys so DOM assertions match the
+    // classes the stylesheet's consumers read, without per-importer hashes.
+    css: { modules: { classNameStrategy: 'non-scoped' } },
   },
 })

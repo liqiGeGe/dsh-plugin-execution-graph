@@ -2,8 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import type {
   ConversationEventInput, ConversationNodeDefinition, ConversationViewDefinition,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import { ConversationNodeAssembler } from '@deepseek-ai/dsh-client-runtime/client'
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { ConversationNodeAssembler } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { registerGraphNodeDefinitions } from '../src/client/graph-node-definitions.ts'
 import { graphNode } from '../src/client/graph-definition-common.ts'
 import type { GraphSnapshot } from '../src/client/graph-contract.ts'
@@ -11,10 +11,12 @@ import { graphViewDefinition } from '../src/client/graph-snapshot-builder.ts'
 
 const DEFINITIONS: ConversationNodeDefinition[] = []
 const registrationContext = {
-  conversationEvents: {
-    register: (definition: ConversationNodeDefinition) => {
-      DEFINITIONS.push(definition)
-      return () => {}
+  uiConversation: {
+    events: {
+      register: (definition: ConversationNodeDefinition) => {
+        DEFINITIONS.push(definition)
+        return () => {}
+      },
     },
   },
 } as unknown as Context
@@ -62,6 +64,9 @@ function assembler(events: readonly ConversationEventInput[]): ConversationNodeA
   )
   value.replaceWindow(events, false)
   value.flush()
+  // 0.2 builds a target's snapshot lazily: the shell's first subscriber
+  // activates it, and `snapshot(target)` stays undefined until then.
+  value.activateTarget('graph')
   return value
 }
 
@@ -193,7 +198,7 @@ describe('Graph conversation Definitions', () => {
       at(4, 'tool/call', { turn: 1, step: 1, callId: 'call-2', name: 'bash', arguments: '{"cmd":"pwd"}' }),
       at(5, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-1' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-1' }, toolCallId: 'call-1', content: [], isError: false },
       }),
     ]))
 
@@ -224,11 +229,11 @@ describe('Graph conversation Definitions', () => {
       at(5, 'tool/call', { turn: 1, step: 1, callId: 'call-b', name: 'bash', arguments: '{}' }),
       at(6, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-b' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-b' }, toolCallId: 'call-b', content: [], isError: false },
       }),
       at(7, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-a' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-a' }, toolCallId: 'call-a', content: [], isError: false },
       }),
       at(8, 'assistant/message', {
         turn: 1,
@@ -267,13 +272,13 @@ describe('Graph conversation Definitions', () => {
       at(3, 'tool/call', { turn: 1, step: 1, callId: 'call-read', name: 'read', arguments: '{"path":"a.ts"}' }),
       at(4, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-read' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-read' }, toolCallId: 'call-read', content: [], isError: false },
         meta: { path: 'a.ts', lines: [{ number: 1, text: 'const a = 1' }] },
       }),
       at(5, 'tool/call', { turn: 1, step: 1, callId: 'call-bash', name: 'bash', arguments: '{}' }),
       at(6, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-bash' }, content: [{ isError: true, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-bash' }, toolCallId: 'call-bash', content: [], isError: true },
         meta: { path: 'a.ts', lines: [] },
       }),
     ]))
@@ -297,7 +302,7 @@ describe('Graph conversation Definitions', () => {
       at(3, 'tool/call', { turn: 1, step: 1, callId: 'call-glob', name: 'glob', arguments: '{"pattern":"*.ts"}' }),
       at(4, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-glob' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-glob' }, toolCallId: 'call-glob', content: [], isError: false },
         meta: 'not-an-object',
       }),
     ]))
@@ -315,11 +320,11 @@ describe('Graph conversation Definitions', () => {
       at(4, 'tool/result', {
         turn: 1, step: 1,
         message: {
-          source: { callId: 'call-bash' },
-          content: [{
-            isError: false,
-            content: [{ type: 'text', text: 'line one' }, { type: 'text', text: 'line two' }],
-          }],
+          role: 'tool',
+          source: { kind: 'tool', callId: 'call-bash' },
+          toolCallId: 'call-bash',
+          content: [{ type: 'text', text: 'line one' }, { type: 'text', text: 'line two' }],
+          isError: false,
         },
       }),
     ]))
@@ -335,7 +340,7 @@ describe('Graph conversation Definitions', () => {
       at(3, 'tool/call', { turn: 1, step: 1, callId: 'call-bash', name: 'bash', arguments: '{}' }),
       at(4, 'tool/result', {
         turn: 1, step: 1,
-        message: { source: { callId: 'call-bash' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-bash' }, toolCallId: 'call-bash', content: [], isError: false },
       }),
     ]))
 
@@ -350,7 +355,7 @@ describe('Graph conversation Definitions', () => {
       at(3, 'tool/call', { turn: 1, step: 1, callId: 'call-bash', name: 'bash', arguments: '{}' }),
       at(4, 'step/end', { turn: 1, step: 1 }),
       at(5, 'tool/result', {
-        message: { source: { callId: 'call-bash' }, content: [{ isError: false, content: [] }] },
+        message: { role: 'tool', source: { kind: 'tool', callId: 'call-bash' }, toolCallId: 'call-bash', content: [], isError: false },
       }),
     ]))
 

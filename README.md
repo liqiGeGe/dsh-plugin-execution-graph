@@ -23,13 +23,13 @@ This is a pure-consumer Cordis plugin with two entry faces:
 2. **React Flow stylesheet** — `installGraphStyles(ctx)` injects a plugin-tagged `<style>` element for the vendored React Flow base stylesheet; the effect's disposer removes the tag on unload.
 3. **Conversation Event Definitions** — `registerGraphNodeDefinitions(ctx)` folds `request/header`, `assistant/message`, `user/message`, and `tool/call`→`tool/result` events into graph contributions.
 4. **Conversation View Definition** — `registerGraphConversationView(ctx)` registers the `graph` target's snapshot builder.
-5. **UI slot** — `ctx.slots.inject('conversation.view', () => ctx.slots.register({ id: 'graph', … }, GraphView))`; `slots.register` returns a disposer and rides the slot service's effect wrapper, so unload removes the tab.
+5. **UI slot** — `ctx.slots.inject('conversation.view', () => ctx.slots.register({ id: 'graph', …, inject: sessionId => ({ hooks: { graph } }) }, GraphView))`; the injected face exposes the Session's `graph` target snapshot as the component's `useGraph` hook. `slots.register` returns a disposer and rides the slot service's effect wrapper, so unload removes the tab.
 
 Because every contribution goes through `ctx.effect` / `ctx.on` and `slots.register`'s returned disposer, unloading the plugin (or disposing its fiber) removes the tab, the locale dictionary, and the stylesheet, restoring the system to its pre-load state. No config rows are written, so there is nothing to clean up on disk. HMR is supported by the framework: a config change that disables the plugin unloads these effects; no manual restart is required beyond the framework's own reload.
 
 ## Service dependencies and injection
 
-`inject = ['slots', 'conversationEvents', 'conversationViews', 'locale']`.
+`inject = ['slots', 'uiConversation', 'locale']`.
 
 These are the services the plugin requires at load time; each is provided by the base DSH client stack (`@deepseek-ai/dsh-base` and the web surface) and declared via the package's `dsh.client.inject` manifest. The plugin declares no optional dependencies and performs no `ctx.get()` of optional services. Because it declares its injections, Cordis disposes the plugin automatically if one of these services is unloaded and re-mounts it when the service returns — the plugin does not need to observe dependency loss itself.
 
@@ -57,7 +57,7 @@ Because the plugin has no config options, users do not edit `cordis.patch.yml` t
 
 ### Requirements
 
-- A DSH runtime hosting the client web surface (the `dsh` CLI with a web-enabled profile) on the **`@next` line** — i.e. the DSH core packages (`@deepseek-ai/dsh-client-*`, `@deepseek-ai/dsh-*`) at `^0.1.1-rc.2` with `@deepseek-ai/cordis` at `^4.0.1`, exactly as declared in this package's `peerDependencies`. DSH publishes this line under the npm `next` dist-tag (`latest` still points to the older `0.0.1-rc.1`), so a consumer profile must install DSH core from `@next`.
+- A DSH runtime hosting the client web surface (the `dsh` CLI with a web-enabled profile) on the **0.2.x line** — i.e. the DSH core packages (`@deepseek-ai/dsh-client-*`, `@deepseek-ai/dsh-*`) at `^0.2.2-rc.1` with `@deepseek-ai/cordis` at `^4.0.1`, exactly as declared in this package's `peerDependencies`.
 - `@deepseek-ai/dsh-client-ui-primitives` and `@deepseek-ai/dsh-client-ui-slots` are **not** peer dependencies: they are platform modules the DSH host shares into its frozen module table, so the plugin's client bundle imports them as externals resolved by the host.
 - Node.js ≥ 22 and pnpm for a from-source checkout.
 
@@ -65,7 +65,7 @@ Because the plugin has no config options, users do not edit `cordis.patch.yml` t
 
 The plugin uses only official DSH extension points and never forks or patches core code:
 
-- **Conversation Event Definitions** (`conversationEvents`) and **Conversation View Definition** (`conversationViews`) — the same two-tier fold/build pipeline Trajectory uses, to project session events into a `GraphSnapshot`.
+- **Conversation Event Definitions** (`ctx.uiConversation.events`) and **Conversation View Definition** (`ctx.uiConversation.views`) — the same two-tier fold/build pipeline Trajectory uses, to project session events into a `GraphSnapshot`.
 - **UI slot** — injects into the `'conversation.view'` slot ring (id `graph`, order 20), alongside Chat and Trajectory.
 - **Locale** — registers the `graph` dictionary namespace.
 

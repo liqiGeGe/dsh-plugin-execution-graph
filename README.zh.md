@@ -29,7 +29,7 @@
 
 ## 服务依赖与注入
 
-`inject = ['slots', 'conversationEvents', 'conversationViews', 'locale']`。
+`inject = ['slots', 'uiConversation', 'locale']`。
 
 这些是插件加载时所需的服务，均由基础 DSH 客户端栈（`@deepseek-ai/dsh-base` 与 web 表面）提供，并通过包的 `dsh.client.inject` 清单声明。插件不声明可选依赖，也不对可选服务调用 `ctx.get()`。因为声明了注入，Cordis 会在某个依赖服务被卸载时自动 dispose 该插件，并在服务恢复后重新挂载——插件自身无需感知依赖丢失。
 
@@ -57,7 +57,7 @@ bundle 的 `cordis.patch.yml` 向客户端名册追加一行：
 
 ### 前置要求
 
-- 承载客户端 web 表面的 DSH 运行时（带 web 配置的 `dsh` CLI），且运行在 **`@next` 线**上——即 DSH 核心包（`@deepseek-ai/dsh-client-*`、`@deepseek-ai/dsh-*`）为 `^0.1.1-rc.2`、`@deepseek-ai/cordis` 为 `^4.0.1`，与本包 `peerDependencies` 声明完全一致。DSH 把这套版本发布在 npm 的 `next` dist-tag 下（`latest` 仍指向较旧的 `0.0.1-rc.1`），因此使用方 profile 需从 `@next` 安装 DSH 核心。
+- 承载客户端 web 表面的 DSH 运行时（带 web 配置的 `dsh` CLI），且运行在 **0.2.x 线**上——即 DSH 核心包（`@deepseek-ai/dsh-client-*`、`@deepseek-ai/dsh-*`）为 `^0.2.2-rc.1`、`@deepseek-ai/cordis` 为 `^4.0.1`，与本包 `peerDependencies` 声明完全一致。
 - `@deepseek-ai/dsh-client-ui-primitives` 与 `@deepseek-ai/dsh-client-ui-slots` **不是** peer 依赖：它们是 DSH host 共享进冻结模块表的 platform module，插件的 client bundle 以外部引用方式由 host 解析。
 - 从源码构建需要 Node.js ≥ 22 与 pnpm。
 
@@ -65,7 +65,7 @@ bundle 的 `cordis.patch.yml` 向客户端名册追加一行：
 
 插件只使用官方 DSH 扩展点，绝不 fork 或补丁核心代码：
 
-- **会话事件定义**（`conversationEvents`）与**会话视图定义**（`conversationViews`）——与 Trajectory 相同的两层 fold/build 管线，把会话事件投影为 `GraphSnapshot`。
+- **会话事件定义**（`ctx.uiConversation.events`）与**会话视图定义**（`ctx.uiConversation.views`）——与 Trajectory 相同的两层 fold/build 管线，把会话事件投影为 `GraphSnapshot`。
 - **UI 插槽**——注入 `'conversation.view'` slot 环（id `graph`、order 20），与 Chat、Trajectory 并列。
 - **Locale**——注册 `graph` 词典命名空间。
 

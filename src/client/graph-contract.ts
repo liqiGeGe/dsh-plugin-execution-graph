@@ -1,4 +1,4 @@
-import type { ConversationLocation, ConversationViewNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationLocation, ConversationViewNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 /** One contiguous line read out of a file by a read-only fs tool call. */
 export interface GraphFileReadLine {
@@ -30,7 +30,7 @@ export interface GraphRequestHeaderNode {
   readonly kind: 'request-header'
   readonly seq: number
   readonly time: number
-  readonly reason: 'initial' | 'resume' | 'change'
+  readonly reason: 'initial' | 'resume' | 'change' | 'series'
   readonly turn: number
   readonly step?: number
   /** The turn's first real user-submitted `user/message` text, attached by the snapshot builder. Absent for a turn with no human message yet (e.g. a synthetic/context-only turn). */
@@ -232,7 +232,7 @@ export interface GraphSnapshot {
   readonly runningCallIds: ReadonlySet<string>
 }
 
-declare module '@deepseek-ai/dsh-client-runtime/client' {
+declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ConversationViewSnapshotMap {
     /** Independently assembled data consumed by the Graph view. */
     graph: GraphSnapshot

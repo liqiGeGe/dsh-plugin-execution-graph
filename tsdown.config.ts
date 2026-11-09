@@ -41,7 +41,6 @@ const HOST_PROVIDED_EXTERNALS = new Set<string>([
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-runtime/client',
 ])
 
 /** Production deps kept as imports in the Node half (present on disk at install). */
@@ -142,10 +141,10 @@ const cssGlobalPlugin = {
   },
 }
 
-/** Node-half library build: the loader entry plus the invariant companion, plain ESM. */
+/** Node-half library build: the loader entry, plain ESM. */
 const libConfig: UserConfig = {
   name: PLUGIN_ID,
-  entry: ['src/index.ts', 'src/invariant.ts'],
+  entry: ['src/index.ts'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
-import { IconChevronDownOutline14, IconCloseOutline16, IconDownloadOutline16, JsonTree, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconChevronDownOutlineMedium, IconCloseOutlineMedium, IconDownloadOutlineMedium, JsonTree, Menu,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { GraphCardNode } from './graph-contract.ts'
+import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { GraphCardNode, GraphSnapshot } from './graph-contract.ts'
 import { filterSnapshotByTurn, listTurnPreviews } from './graph-contract.ts'
 import { assistantFoldMembers, foldCapsuleView } from './graph-fold.ts'
 import { layoutGraphSnapshot } from './graph-layout.ts'
@@ -60,7 +63,25 @@ function ToolCallDetail({ node, t }: { node: Extract<GraphCardNode, { kind: 'too
       <div className={css.detailSectionLabel}>{t('detail.payload')}</div>
       {parsed === null
         ? <pre className={css.detailPre}>{node.argsRaw}</pre>
-        : <JsonTree data={parsed} label={t('detail.payload')} className={css.payloadTree} />}
+        : (
+            <JsonTree
+              data={parsed}
+              label={t('detail.payload')}
+              className={css.payloadTree}
+              labels={{
+                copyValue: t('json.copyValue'),
+                copyJson: t('json.copyJson'),
+                copyPath: t('json.copyPath'),
+                copyPrettyJson: t('json.copyPrettyJson'),
+                copyCompactJson: t('json.copyCompactJson'),
+                copied: t('json.copied'),
+                copyFailed: t('json.copyFailed'),
+                collapseNode: t('json.collapseNode'),
+                expandNode: t('json.expandNode'),
+                copyButtonTitle: action => t('json.copyButtonTitle', { action }),
+              }}
+            />
+          )}
       {command !== undefined && (
         <>
           <div className={css.detailSectionLabel}>{t('detail.command')}</div>
@@ -166,7 +187,7 @@ function TurnSelect({
       items={items}
       onSelect={(id) => { onChange(Number(id)); setOpen(false) }}
       onClose={() => { setOpen(false) }}
-      getAnchorRect={() => triggerRef.current?.getBoundingClientRect() ?? null}
+      anchorRef={triggerRef}
       anchor={(
         <button
           ref={triggerRef}
@@ -178,7 +199,7 @@ function TurnSelect({
           onClick={() => { setOpen(current_ => !current_) }}
         >
           <span className={css.turnSelectLabel}>{current === undefined ? '' : labelOf(current)}</span>
-          <IconChevronDownOutline14 className={css.turnSelectChevron} />
+          <IconChevronDownOutlineMedium size={14} className={css.turnSelectChevron} />
         </button>
       )}
     />
@@ -201,17 +222,31 @@ function ViewportController({ resetKey, width, height }: { resetKey: string | nu
   return null
 }
 
+/** Business face injected by the browser plugin. */
+export interface GraphViewInjected {
+  /** Snapshot sources bound by InjectFace. */
+  hooks: {
+    /** This target's snapshot; InjectFace exposes it as `useGraph`. */
+    graph: ObservableSnapshot<GraphSnapshot>
+  }
+}
+
+/** Full props of the Execution graph conversation View. */
+export type GraphViewProps =
+  ConvViewProps & InjectFace<GraphViewInjected> & PropsLocale<typeof NS>
+
 /**
  * Conversation-view tab rendering one turn's activity as a React Flow timeline.
  * Read-only: nodes are not draggable or connectable, and the graph is derived
- * from `useSession`. The turn selector defaults to the session's last turn and
+ * from the injected `graph` target snapshot. The turn selector defaults to the
+ * session's last turn and
  * lists every turn present; picking one narrows the graph before layout.
  * Selecting a node fills a persistent right-hand detail sidebar.
  *
  * @param props - Standard conversation-view props plus this plugin's locale binding.
  */
-export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof NS>) {
-  const snapshot = useSession(session => session.views.get('graph') ?? EMPTY_GRAPH_SNAPSHOT)
+export function GraphView({ useGraph, t }: GraphViewProps) {
+  const snapshot = useGraph(value => value) ?? EMPTY_GRAPH_SNAPSHOT
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const sidebar = useResizableWidth()
   // `null` means "auto-follow the last turn"; a number means the user picked a turn explicitly.
@@ -442,7 +477,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
             title={t('export.png')}
             onClick={() => { void downloadGraphPng(layout, filtered.runningCallIds, t, exportFileName(selectedTurn)) }}
           >
-            <IconDownloadOutline16 size={16} />
+            <IconDownloadOutlineMedium size={16} />
           </button>
         </div>
         {sidebar.width > 0 && (
@@ -464,7 +499,7 @@ export function GraphView({ useSession, t }: ConvViewProps & PropsLocale<typeof 
                 title={t('sidebar.close')}
                 onClick={() => { sidebar.collapse(); setSelectedId(null) }}
               >
-                <IconCloseOutline16 size={14} />
+                <IconCloseOutlineMedium size={14} />
               </button>
               <DetailPanel node={selected} t={t} />
             </div>

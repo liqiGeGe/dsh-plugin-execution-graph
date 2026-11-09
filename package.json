@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-execution-graph",
   "description": "DeepSeek Harness plugin: adds an \"Execution graph\" tab to the conversation view that reconstructs a per-turn directed graph of user prompts, model replies, and tool calls/results from session events, with per-reply folding of tool segments, a resizable payload detail panel, and PNG export. Pure-consumer client plugin: registers one conversation-view slot entry, declares no service, and reverts every side effect on unload.",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "license": "Apache-2.0",
   "type": "module",
   "publishConfig": {
@@ -26,10 +26,6 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
@@ -41,7 +37,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation"
       ],
       "platform": "web"
@@ -62,27 +57,28 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-locale": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-tools": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-session": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../deepseek-harness/vendor/cordis",
-    "@deepseek-ai/dsh-agent": "link:../deepseek-harness/packages/core/agent",
     "@deepseek-ai/dsh-client-locale": "link:../deepseek-harness/packages/client/locale",
-    "@deepseek-ai/dsh-client-runtime": "link:../deepseek-harness/packages/client/runtime",
+    "@deepseek-ai/dsh-api-session-controller": "link:../deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-client-store": "link:../deepseek-harness/packages/client/store",
     "@deepseek-ai/dsh-client-test-runtime": "link:../deepseek-harness/packages/test-support/client-runtime",
     "@deepseek-ai/dsh-client-ui-conversation": "link:../deepseek-harness/packages/client/ui-conversation",
     "@deepseek-ai/dsh-client-ui-primitives": "link:../deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-session": "link:../deepseek-harness/packages/client/ui-session",
     "@deepseek-ai/dsh-client-ui-slots": "link:../deepseek-harness/packages/client/ui-slots",
-    "@deepseek-ai/dsh-invariants": "link:../deepseek-harness/packages/runtime-diagnostics/invariants",
     "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
-    "@deepseek-ai/dsh-tools": "link:../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/dsh-session": "link:../deepseek-harness/packages/core/session",
     "@testing-library/react": "^16.3.2",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",
@@ -98,7 +94,6 @@
   },
   "files": [
     "lib/index.js",
-    "lib/invariant.js",
     "lib/client.js",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",

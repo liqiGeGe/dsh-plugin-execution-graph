@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { ConversationMatch, ConversationNodeDefinition } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationMatch, ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { TextBlock } from '@deepseek-ai/dsh-llm/types'
 import type {
   GraphAssistantMessageNode, GraphFileReadRange, GraphRequestHeaderNode,
@@ -161,7 +161,7 @@ const graphToolDefinition: ConversationNodeDefinition<GraphToolLifecycle> = {
     const isFileReadTool = FILE_READ_TOOL_NAMES.has(call.name)
     const meta = match.event.data.meta
     const fileRead = isFileReadTool && isGraphFileReadRange(meta) ? meta : undefined
-    const resultText = extractResultText(match.event.data.message.content[0].content)
+    const resultText = extractResultText(match.event.data.message.content)
     return {
       ...context.state,
       result: {
@@ -172,7 +172,7 @@ const graphToolDefinition: ConversationNodeDefinition<GraphToolLifecycle> = {
         step: locationStep(match),
         callId: call.callId,
         name: call.name,
-        isError: match.event.data.message.content[0].isError === true,
+        isError: match.event.data.message.isError === true,
         durationMs: match.event.time - call.time,
         ...(fileRead === undefined ? {} : { fileRead }),
         ...(resultText === undefined ? {} : { resultText }),
@@ -191,8 +191,8 @@ const graphToolDefinition: ConversationNodeDefinition<GraphToolLifecycle> = {
  * @param ctx - Plugin context receiving the Definitions.
  */
 export function registerGraphNodeDefinitions(ctx: Context): void {
-  ctx.conversationEvents.register(graphRequestHeaderDefinition)
-  ctx.conversationEvents.register(graphAssistantMessageDefinition)
-  ctx.conversationEvents.register(graphUserMessageDefinition)
-  ctx.conversationEvents.register(graphToolDefinition)
+  ctx.uiConversation.events.register(graphRequestHeaderDefinition)
+  ctx.uiConversation.events.register(graphAssistantMessageDefinition)
+  ctx.uiConversation.events.register(graphUserMessageDefinition)
+  ctx.uiConversation.events.register(graphToolDefinition)
 }

@@ -7,13 +7,13 @@
  * is not built (`pnpm build`).
  */
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
+import { stubConfigForm, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  ConversationEventRegistry, ConversationViewRegistry, SlotRegistry,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { UiConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 
 const PLUGIN_ID = 'dsh-plugin-execution-graph'
 
@@ -22,9 +22,9 @@ type Win = { __ModuleLoader__?: { load(h: Handoff): void } }
 
 function readBundle(): string | undefined {
   try {
-    // Resolve the built artifact relative to this test file so the lookup works
-    // regardless of the vitest working directory.
-    return readFileSync(fileURLToPath(new URL('../lib/client.js', import.meta.url)), 'utf8')
+    // Suite collection runs outside the module graph, where `import.meta.url`
+    // is not necessarily a file URL; vitest always runs from the project root.
+    return readFileSync(resolve(process.cwd(), 'lib/client.js'), 'utf8')
   } catch {
     return undefined
   }
@@ -50,7 +50,6 @@ describe('tsdown client artifact', () => {
       ['react', await import('react')],
       ['react/jsx-runtime', await import('react/jsx-runtime')],
       ['react-dom', await import('react-dom')],
-      ['@deepseek-ai/dsh-client-runtime/client', await import('@deepseek-ai/dsh-client-runtime/client')],
       ['@deepseek-ai/dsh-client-ui-primitives', await import('@deepseek-ai/dsh-client-ui-primitives')],
     ])
     const exports = handoff!.factory((spec) => {
@@ -64,15 +63,16 @@ describe('tsdown client artifact', () => {
     const { handoff, exports } = await loadArtifact()
     expect(handoff.id).toBe(PLUGIN_ID)
     expect(exports.apply).toBeTypeOf('function')
-    expect(exports.inject).toEqual(['slots', 'conversationEvents', 'conversationViews', 'locale'])
+    expect(exports.inject).toEqual(['slots', 'uiConversation', 'locale'])
   })
 
   it.skipIf(code === undefined)('mounted as an object plugin, apply registers the view tab on the real ring', async () => {
     const { exports } = await loadArtifact()
     const ctx = new Context()
-    const slots = new SlotRegistry(ctx)
-    await ctx.plugin(ConversationEventRegistry).await()
-    await ctx.plugin(ConversationViewRegistry).await()
+    await ctx.plugin(SlotRegistry).await()
+    const slots = ctx.slots as SlotRegistry
+    const uiConversation = new UiConversation(ctx, { binding: () => undefined } as unknown as ISessions)
+    const { events, views } = uiConversation
     // The conversation entry's role: the ring must be declared before riders land.
     slots.register({
       name: 'root',
@@ -81,12 +81,11 @@ describe('tsdown client artifact', () => {
     ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
     ctx.provide('remote', { $on: () => () => {} } as never)
     ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
+    ctx.provide('configForms', { get: () => stubConfigForm().scope } as never)
     const locale = await import('@deepseek-ai/dsh-client-locale/client')
-    ctx.plugin({ inject: [...locale.inject], apply: locale.apply })
+    await ctx.plugin({ inject: [...locale.inject], apply: locale.apply }).await()
     const fiber = ctx.plugin(exports as { apply: (ctx: Context) => void })
     await fiber.await()
-    const events = ctx.get('conversationEvents') as ConversationEventRegistry
-    const views = ctx.get('conversationViews') as ConversationViewRegistry
     expect(slots.entries('conversation.view').map(e => e.options.id)).toEqual(['graph'])
     expect(events.entries().length).toBeGreaterThan(0)
     expect(views.entries()).toHaveLength(1)
